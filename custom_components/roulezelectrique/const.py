@@ -10,7 +10,16 @@ CONF_SCAN_INTERVAL = "scan_interval"
 
 # Defaults
 DEFAULT_BASE_URL = "https://roulezelectrique.club"
-DEFAULT_SCAN_INTERVAL = 60  # seconds
+# 30s (was 60s): this poll is the ONLY thing that ever picks up a change made
+# OUTSIDE Home Assistant (e.g. from the Roulez Électrique mobile app) — HA's
+# own writes already self-refresh instantly via async_request_refresh() (see
+# number.py/switch.py), so only the app→HA direction was ever waiting on this
+# timer. Halving it halves worst-case latency for that direction. Safe to
+# lower: MIN_SCAN_INTERVAL already permits 30, the server's
+# /home-assistant/state read is cheap/cached, and any install with its own
+# saved `scan_interval` option is unaffected (this is only the fallback for
+# entries that never customized it).
+DEFAULT_SCAN_INTERVAL = 30  # seconds
 MIN_SCAN_INTERVAL = 30
 MAX_SCAN_INTERVAL = 900
 
@@ -48,4 +57,4 @@ COMMAND_TERMINAL_STATUSES = {"accepted", "rejected", "timeout", "failed"}
 COORDINATOR_CHARGERS_KEY = "chargers"
 
 # Platforms
-PLATFORMS = ["binary_sensor", "number", "sensor", "switch"]
+PLATFORMS = ["binary_sensor", "button", "number", "sensor", "switch"]

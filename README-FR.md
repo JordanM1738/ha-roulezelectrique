@@ -77,6 +77,7 @@ Les capteurs de télémétrie (puissance, énergie, courant, tension, températu
 - **Interrupteur de charge** (démarrer/arrêter) — OCPP, Wallbox, AVE, Sigenergy AC et DC. Les commandes sont confirmées de bout en bout : les commandes OCPP sont interrogées jusqu'à ce que la borne les accepte/rejette ; les autres vendeurs répondent de façon synchrone (le résultat est déjà connu à la réponse) ; les échecs apparaissent en notification d'erreur HA et l'interrupteur revient en arrière (pas de faux état).
 - **Courant maximal** (curseur numérique, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, AVE, Sigenergy AC. **Les bornes EVduty/Elmec ont un curseur distinct** (« Courant max (EVduty) ») : leur micrologiciel est OCPP « Core »-only et rejette `SetChargingProfile`, le serveur applique donc la valeur en écrivant le réglage `MaxCurrent` de la borne. Deux conséquences propres à ce chemin — appliquer une valeur **redémarre la borne pendant 30 à 60 s** (c'est ce redémarrage qui l'applique), et la commande est **refusée pendant une recharge en cours**. Son plafond est la valeur d'installation relevée sur la borne, jamais au-dessus. Une borne affiche l'un OU l'autre curseur, jamais les deux. Les limites viennent du serveur (typiquement 6 A jusqu'au maximum de la borne). Depuis la v0.6.0, quand une borne OCPP rapporte elle-même sa limite de courant matérielle dans sa configuration, ce maximum est utilisé comme plafond — par exemple, les bornes Wallbox Pulsar Plus en OCPP qui rapportent 48 A obtiennent un plafond de 48 A au lieu du maximum générique de 32 A. Non disponible pour Sigenergy DC (aucune API de limite de courant côté DC).
 - **Interrupteur de verrou** — Wallbox seulement (activé = verrouillé).
+- **Actualiser** (bouton) — **nouveau.** Toutes les bornes. Appuyez dessus pour forcer une vérification immédiate des données du serveur — la seule entité de cette intégration qui ne dépend jamais de `controllable`/du vendeur et qui est toujours disponible. Utile pour un changement fait en dehors de Home Assistant (ex. depuis l'application mobile Roulez Électrique), qui n'apparaît autrement dans HA qu'au prochain sondage prévu (voir **Intervalle de mise à jour** ci-dessous). L'action native de Home Assistant Core « Actualiser l'entité » (`homeassistant.update_entity`, accessible depuis la fenêtre de détail de l'entité ou dans les automatisations/scripts) fait exactement la même chose et fonctionne aussi — ce bouton est simplement un raccourci en un clic depuis l'application compagnon.
 
 ### Appareil Compte
 
@@ -141,7 +142,7 @@ Vos bornes apparaissent comme appareils HA en quelques secondes. L'interface est
 
 Après la configuration, ouvrez les paramètres de l'intégration pour ajuster :
 
-- **Intervalle de mise à jour** (30–900 secondes, défaut 60) : à quelle fréquence HA interroge pour de nouvelles données. L'intégration ralentit automatiquement si le serveur la limite en débit.
+- **Intervalle de mise à jour** (30–900 secondes, défaut 30) : à quelle fréquence HA interroge pour de nouvelles données. L'intégration ralentit automatiquement si le serveur la limite en débit. C'est aussi la seule façon dont un changement fait en dehors de Home Assistant (ex. depuis l'application mobile Roulez Électrique) est détecté — voir le bouton **Actualiser** ci-dessous pour forcer une vérification immédiate plutôt que d'attendre.
 
 ---
 

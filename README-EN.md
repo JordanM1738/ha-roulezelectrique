@@ -77,6 +77,7 @@ Telemetry sensors (power, energy, current, voltage, temperature, battery level, 
 - **Charge switch** (start/stop) — OCPP, Wallbox, AVE, Sigenergy AC and DC. Commands are confirmed end-to-end: OCPP commands are polled until the charger accepts/rejects; the other vendors respond synchronously (the result is already known in the response); failures surface as an HA error toast and the switch reverts (no fake state).
 - **Max current** (number slider, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, AVE, Sigenergy AC. **EVduty/Elmec chargers get a separate slider** ("Max current (EVduty)"): their firmware is OCPP "Core"-only and rejects `SetChargingProfile` outright, so the server applies the value by writing the charger's `MaxCurrent` setting instead. Two consequences specific to that path — applying a value **reboots the charger for 30-60 s** (that reboot is what makes it take effect), and the command is **refused while a session is in progress**. Its ceiling is the installation baseline captured from the charger, never higher. A charger shows one slider or the other, never both. Bounds come from the server (typically 6 A up to the charger's max). Since v0.6.0, when an OCPP charger reports its own hardware current limit in its configuration, that value is used as the ceiling — for example, Wallbox Pulsar Plus chargers on OCPP that report 48 A now get a 48 A ceiling instead of the generic 32 A default. Not available for Sigenergy DC (no current-limit API on the DC side).
 - **Lock switch** — Wallbox only (on = locked).
+- **Refresh** (button) — **new.** Every charger. Press it to force an immediate re-check of the server's data — the only entity in this integration that never depends on `controllable`/vendor and is always available. Useful for a change made outside Home Assistant (e.g. from the Roulez Électrique mobile app), which otherwise only shows up in HA on the next scheduled poll (see **Update interval** below). Home Assistant Core's built-in "Update entity" action (`homeassistant.update_entity`, available from the entity's more-info dialog or in automations/scripts) does the exact same thing and works too — this button is simply a one-tap shortcut for it from the companion app.
 
 ### Account device
 
@@ -141,7 +142,7 @@ Your chargers appear as HA devices within a few seconds. The UI is available in 
 
 After setup, open the integration's settings to adjust:
 
-- **Update interval** (30–900 seconds, default 60): how often HA polls for new data. The integration backs off automatically if the server rate-limits it.
+- **Update interval** (30–900 seconds, default 30): how often HA polls for new data. The integration backs off automatically if the server rate-limits it. This is also the only thing that ever picks up a change made outside Home Assistant (e.g. from the Roulez Électrique mobile app) — see the **Refresh** button below for a way to force a check immediately instead of waiting.
 
 ---
 

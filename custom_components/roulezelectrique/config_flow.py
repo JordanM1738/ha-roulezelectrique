@@ -4,7 +4,7 @@ Steps:
   user  → ask for base_url + api_token; validate via GET /state
   reauth → ask for api_token only (base_url preserved from entry)
 
-OptionsFlow: scan_interval (30–900 s, default 60).
+OptionsFlow: scan_interval (30–900 s, default 30).
 """
 
 from __future__ import annotations
