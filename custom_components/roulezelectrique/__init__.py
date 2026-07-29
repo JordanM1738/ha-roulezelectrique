@@ -19,8 +19,8 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import OfflineError, RateLimitedError, RoulezElectriqueApiClient
-from .const import CONF_API_TOKEN, CONF_BASE_URL, DOMAIN, PLATFORMS
+from .api import ChargingInProgressError, OfflineError, RateLimitedError, RoulezElectriqueApiClient
+from .const import CONF_API_TOKEN, CONF_BASE_URL, DEFAULT_MAX_AMPS, DEFAULT_MIN_AMPS, DOMAIN, PLATFORMS
 from .coordinator import RoulezElectriqueCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -117,9 +117,9 @@ def _async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"Charger {charger_id} is offline — cannot start charge session") from err
         except RateLimitedError as err:
             raise HomeAssistantError(f"Too many requests — please wait {err.retry_after}s before retrying") from err
+        except HomeAssistantError:
+            raise
         except Exception as err:
-            if isinstance(err, HomeAssistantError):
-                raise
             raise HomeAssistantError(f"Could not start charge session on charger {charger_id}: {err}") from err
 
     async def async_handle_remote_stop(call) -> None:
@@ -156,9 +156,9 @@ def _async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"Charger {charger_id} is offline — cannot stop charge session") from err
         except RateLimitedError as err:
             raise HomeAssistantError(f"Too many requests — please wait {err.retry_after}s before retrying") from err
+        except HomeAssistantError:
+            raise
         except Exception as err:
-            if isinstance(err, HomeAssistantError):
-                raise
             raise HomeAssistantError(f"Could not stop charge session on charger {charger_id}: {err}") from err
 
     async def async_handle_set_power_limit(call) -> None:
@@ -170,33 +170,67 @@ def _async_setup_services(hass: HomeAssistant) -> None:
         if not client or not coordinator:
             raise HomeAssistantError(f"Charger with ID {charger_id} not found in any integration entry")
 
-        # Validation of max_amps
         charger_data = coordinator.data.chargers.get(charger_id, {})
-        max_amps = charger_data.get("max_amps")
-        if max_amps is not None and amps > max_amps:
-            raise HomeAssistantError(
-                f"Le courant demandé de {amps}A dépasse la limite maximale de la borne ({max_amps}A)"
-            )
+        is_max_current_controllable = bool(charger_data.get("max_current_controllable"))
+
+        if is_max_current_controllable:
+            min_val = charger_data.get("max_current_min")
+            min_amps = int(min_val) if min_val is not None else DEFAULT_MIN_AMPS
+            max_val = charger_data.get("max_current_max")
+            max_amps = int(max_val) if max_val is not None else DEFAULT_MAX_AMPS
+            max_amps = max(max_amps, min_amps)
+
+            if amps < min_amps or amps > max_amps:
+                raise HomeAssistantError(
+                    f"Le courant demandé de {amps}A doit être entre {min_amps}A et {max_amps}A pour cette borne"
+                )
+        else:
+            max_amps = charger_data.get("max_amps")
+            if max_amps is not None and amps > max_amps:
+                raise HomeAssistantError(
+                    f"Le courant demandé de {amps}A dépasse la limite maximale de la borne ({max_amps}A)"
+                )
 
         try:
-            result = await client.set_power_limit(
-                charger_id=charger_id,
-                amps=amps,
-            )
-            if not result.get("synchronous") and result.get("id") is not None:
-                cmd = await client.await_command(result["id"])
-                final_status = cmd.get("status", "")
-                if final_status != "accepted":
-                    error_detail = cmd.get("error") or cmd.get("result") or final_status
-                    raise HomeAssistantError(f"Set charging current {final_status}: {error_detail}")
+            if is_max_current_controllable:
+                result = await client.set_max_current(
+                    charger_id=charger_id,
+                    amps=amps,
+                )
+                if not result.get("ok"):
+                    step = result.get("step") or "unknown"
+                    confirmed = result.get("confirmed_amps")
+                    if confirmed is not None:
+                        raise HomeAssistantError(
+                            f"Maximum current {confirmed} A was written and confirmed, but the "
+                            f"charger reboot that applies it did not complete ({step}). "
+                            "The setting may take effect at the next restart."
+                        )
+                    raise HomeAssistantError(f"Could not set the maximum current ({step})")
+            else:
+                result = await client.set_power_limit(
+                    charger_id=charger_id,
+                    amps=amps,
+                )
+                if not result.get("synchronous") and result.get("id") is not None:
+                    cmd = await client.await_command(result["id"])
+                    final_status = cmd.get("status", "")
+                    if final_status != "accepted":
+                        error_detail = cmd.get("error") or cmd.get("result") or final_status
+                        raise HomeAssistantError(f"Set charging current {final_status}: {error_detail}")
             await coordinator.async_request_refresh()
+        except ChargingInProgressError as err:
+            raise HomeAssistantError(
+                "A charging session is in progress — setting the maximum current "
+                "reboots the charger, so it is refused until the session ends"
+            ) from err
         except OfflineError as err:
             raise HomeAssistantError(f"Charger {charger_id} is offline — cannot set charging current") from err
         except RateLimitedError as err:
             raise HomeAssistantError(f"Too many requests — please wait {err.retry_after}s before retrying") from err
+        except HomeAssistantError:
+            raise
         except Exception as err:
-            if isinstance(err, HomeAssistantError):
-                raise
             raise HomeAssistantError(f"Could not set charging current on charger {charger_id}: {err}") from err
 
     hass.services.async_register(
