@@ -172,6 +172,9 @@
     "number": {
       "max_current": {
         "name": "Max charging current"
+      },
+      "evduty_max_current": {
+        "name": "Max current (EVduty)"
       }
     }
   }

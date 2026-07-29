@@ -172,6 +172,9 @@
     "number": {
       "max_current": {
         "name": "Courant de charge max"
+      },
+      "evduty_max_current": {
+        "name": "Courant max (EVduty)"
       }
     }
   }

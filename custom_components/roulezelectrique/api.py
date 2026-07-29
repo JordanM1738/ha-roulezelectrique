@@ -8,6 +8,9 @@ Exceptions hierarchy:
     ├── ConnectError               network / timeout / 5xx
     ├── RateLimitedError           429 — carry Retry-After seconds
     ├── OfflineError               409 — charger offline at command time
+    ├── ChargingInProgressError    409 {"error": "charging_in_progress"} —
+    │                              set_max_current only; the server refuses to
+    │                              run a reboot-ending recipe mid-session
     └── ForbiddenError             403 — non-OCPP charger or onboarding gate
 """
 
@@ -22,6 +25,7 @@ import aiohttp
 from .const import (
     API_COMMAND_POLL_PATH,
     API_LOCK_PATH,
+    API_MAX_CURRENT_PATH,
     API_POWER_LIMIT_PATH,
     API_REMOTE_START_PATH,
     API_REMOTE_STOP_PATH,
@@ -29,6 +33,7 @@ from .const import (
     COMMAND_POLL_INTERVAL,
     COMMAND_TERMINAL_STATUSES,
     COMMAND_TIMEOUT,
+    MAX_CURRENT_REQUEST_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +66,17 @@ class OfflineError(RoulezElectriqueError):
     """HTTP 409 — charger is offline, command cannot be sent."""
 
 
+class ChargingInProgressError(RoulezElectriqueError):
+    """HTTP 409 {"error": "charging_in_progress"} — set_max_current only.
+
+    The MaxCurrent recipe ends with a Reset(Soft) that interrupts whatever
+    charge is running, so the server refuses it while a session is active (or
+    while that state cannot be determined). Distinct from OfflineError because
+    the remedy is the opposite: wait for the session to END, rather than for
+    the borne to come back online.
+    """
+
+
 class ForbiddenError(RoulezElectriqueError):
     """HTTP 403 — non-OCPP charger or account onboarding gate."""
 
@@ -91,11 +107,14 @@ class RoulezElectriqueApiClient:
         method: str,
         path: str,
         json: dict[str, Any] | None = None,
+        timeout: aiohttp.ClientTimeout | None = None,
     ) -> dict[str, Any]:
         """Make a single HTTP request and return parsed JSON.
 
         Raises the appropriate typed exception for 4xx/5xx status codes.
-        Wraps network failures in ConnectError.
+        Wraps network failures in ConnectError. `timeout` overrides the default
+        20s budget for the one endpoint that legitimately runs longer (see
+        set_max_current).
         """
         url = f"{self._base_url}{path}"
         try:
@@ -104,7 +123,7 @@ class RoulezElectriqueApiClient:
                 url,
                 headers=self._headers,
                 json=json,
-                timeout=_REQUEST_TIMEOUT,
+                timeout=timeout or _REQUEST_TIMEOUT,
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
@@ -113,6 +132,24 @@ class RoulezElectriqueApiClient:
                 if resp.status == 403:
                     raise ForbiddenError("Charger does not support remote control or account not fully set up")
                 if resp.status == 409:
+                    # 409 is overloaded: every command endpoint uses it for
+                    # "borne offline", and max-current adds
+                    # {"error": "charging_in_progress"}. Read the body to tell
+                    # them apart — the two need opposite advice. Fail back to
+                    # OfflineError (the historical meaning) whenever the body
+                    # is missing, non-JSON or unrecognised, so no existing
+                    # caller changes behaviour.
+                    error_code = None
+                    try:
+                        body = await resp.json()
+                        if isinstance(body, dict):
+                            error_code = body.get("error")
+                    except (aiohttp.ContentTypeError, ValueError):
+                        pass
+                    if error_code == "charging_in_progress":
+                        raise ChargingInProgressError(
+                            "A charging session is in progress on this charger"
+                        )
                     raise OfflineError("Charger is offline")
                 if resp.status == 429:
                     retry_after = int(resp.headers.get("Retry-After", "60"))
@@ -193,6 +230,56 @@ class RoulezElectriqueApiClient:
         """
         path = API_POWER_LIMIT_PATH.format(charger_id=charger_id)
         return await self._request("POST", path, json={"amps": amps})
+
+    async def set_max_current(
+        self,
+        charger_id: int,
+        amps: int,
+    ) -> dict[str, Any]:
+        """POST /api/v1/chargers/{id}/max-current → the recipe outcome dict.
+
+        The EVduty/Elmec `MaxCurrent` amperage control — the ONLY power-limit
+        path for "Core"-only OCPP bornes, which reject SetChargingProfile with
+        NotSupported (so /power-limit can never work for them).
+
+        Unlike every other command endpoint this one is SYNCHRONOUS and returns
+        NO command id to poll: the server runs the whole
+        ChangeConfiguration -> read-back -> Reset(Soft) recipe inside the
+        request and returns its outcome:
+
+            {
+                "step": "applied" | "change_timeout" | "change_rejected"
+                      | "readback_offline" | "readback_timeout"
+                      | "readback_mismatch" | "reset_offline" | "reset_failed",
+                "ok": bool,
+                "confirmed_amps": int | None,
+                "change_command_id": int,
+                "readback_command_id": int | None,
+                "reset_command_id": int | None,
+                "cp_status": str | None,
+            }
+
+        `ok` is the only success signal — a partial outcome (e.g. the value was
+        written and confirmed but the Reset failed) returns ok=False WITH a
+        non-null confirmed_amps, and callers must report that honestly rather
+        than as a plain failure: the borne may already hold the new value.
+
+        The final Reset(Soft) reboots the borne for 30-60s, so the server
+        refuses (409 charging_in_progress → ChargingInProgressError) while a
+        session is running. Rate limited to 10/min server-side.
+
+        Raises ChargingInProgressError (409), OfflineError (409),
+        RateLimitedError (429), ForbiddenError (403), and
+        RoulezElectriqueError for a 422 (not an EVduty/Elmec borne, no baseline
+        known, or amps outside the borne's permitted range).
+        """
+        path = API_MAX_CURRENT_PATH.format(charger_id=charger_id)
+        return await self._request(
+            "POST",
+            path,
+            json={"amps": amps},
+            timeout=aiohttp.ClientTimeout(total=MAX_CURRENT_REQUEST_TIMEOUT),
+        )
 
     async def set_lock(
         self,

@@ -435,3 +435,54 @@ COMMAND_QUEUED: dict[str, Any] = {"id": 99, "status": "queued", "result": None, 
 COMMAND_ACCEPTED: dict[str, Any] = {"id": 99, "status": "accepted", "result": None, "error": None}
 COMMAND_REJECTED: dict[str, Any] = {"id": 99, "status": "rejected", "result": None, "error": "ChargePoint rejected"}
 COMMAND_TIMEOUT: dict[str, Any] = {"id": 99, "status": "timeout", "result": None, "error": "No response"}
+
+
+# "Core"-only OCPP borne (EVduty/Elmec family): the firmware rejects
+# SetChargingProfile with NotSupported, so the server turns
+# `current_limit_controllable` OFF and offers the MaxCurrent path instead. The
+# two flags are mutually exclusive by construction server-side.
+EVDUTY_CHARGER: dict[str, Any] = {
+    **OCPP_CHARGER,
+    "id": 9,
+    "name": "Borne EVduty",
+    "serial_number": "EVC48-45642",
+    "model": "EVC48",
+    "current_limit_controllable": False,
+    "max_current_controllable": True,
+    "max_current_min": 6,
+    "max_current_max": 48,
+}
+
+# Recipe outcomes returned by POST /chargers/{id}/max-current.
+MAX_CURRENT_APPLIED: dict[str, Any] = {
+    "step": "applied",
+    "ok": True,
+    "confirmed_amps": 24,
+    "change_command_id": 501,
+    "readback_command_id": 502,
+    "reset_command_id": 503,
+    "cp_status": "Accepted",
+}
+
+# Partial outcome: written AND confirmed on the borne, but the Reset that
+# actually applies it never landed.
+MAX_CURRENT_RESET_FAILED: dict[str, Any] = {
+    "step": "reset_failed",
+    "ok": False,
+    "confirmed_amps": 24,
+    "change_command_id": 501,
+    "readback_command_id": 502,
+    "reset_command_id": 503,
+    "cp_status": "Rejected",
+}
+
+# Total failure: the borne never accepted the write.
+MAX_CURRENT_CHANGE_REJECTED: dict[str, Any] = {
+    "step": "change_rejected",
+    "ok": False,
+    "confirmed_amps": None,
+    "change_command_id": 501,
+    "readback_command_id": None,
+    "reset_command_id": None,
+    "cp_status": "Rejected",
+}

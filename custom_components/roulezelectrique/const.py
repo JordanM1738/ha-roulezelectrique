@@ -19,8 +19,17 @@ API_STATE_PATH = "/api/v1/home-assistant/state"
 API_REMOTE_START_PATH = "/api/v1/chargers/{charger_id}/remote-start"
 API_REMOTE_STOP_PATH = "/api/v1/chargers/{charger_id}/remote-stop"
 API_POWER_LIMIT_PATH = "/api/v1/chargers/{charger_id}/power-limit"
+API_MAX_CURRENT_PATH = "/api/v1/chargers/{charger_id}/max-current"
 API_LOCK_PATH = "/api/v1/chargers/{charger_id}/lock"
 API_COMMAND_POLL_PATH = "/api/v1/commands/{command_id}"
+
+# The EVduty/Elmec MaxCurrent recipe (ChangeConfiguration -> read-back ->
+# Reset) runs SYNCHRONOUSLY inside the server's single HTTP request, with a
+# per-step budget of ~12s x 3 steps. The default 20s client timeout would
+# abort a perfectly healthy call mid-recipe, so this endpoint gets its own,
+# wider budget. Kept under the server-side ceiling it is bounded by
+# (php max_execution_time 60s / nginx fastcgi_read_timeout 120s).
+MAX_CURRENT_REQUEST_TIMEOUT = 75  # seconds
 
 # Default current bounds for the power-limit number entity, used when the
 # server omits them (older server / read failure). The server validates
