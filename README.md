@@ -11,7 +11,9 @@ Connect your [Roulez Électrique](https://roulezelectrique.club) EV chargers to 
 
 ---
 
-**Nouveau / New (v0.6.0):** Six new OCPP diagnostic sensors (Wi-Fi signal, min/max charge level, charger current limit, heartbeat & meter intervals) read from an eligible charger's own configuration, plus a smarter max-current ceiling for Wallbox Pulsar Plus chargers on OCPP. See the full docs above for details.
+**Nouveau / New (v0.7.0) :** Le curseur de courant maximal fonctionne enfin sur les bornes EVduty/Elmec, qui rejetaient jusqu'ici la commande OCPP utilisée. Attention : appliquer une valeur redémarre la borne 30-60 s, et la commande est refusée pendant une recharge. Voir la doc complète ci-dessus.
+
+**New (v0.7.0):** The max-current slider finally works on EVduty/Elmec chargers, which until now rejected the OCPP command it used. Note: applying a value reboots the charger for 30-60 s, and the command is refused while a session is in progress. See the full docs above.
 
 ## Licence / License
 
