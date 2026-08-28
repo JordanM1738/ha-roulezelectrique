@@ -180,3 +180,27 @@ async def test_service_exception_handling():
     client.remote_start = AsyncMock(side_effect=ValueError("Some internal error"))
     with pytest.raises(HomeAssistantError, match="Could not start charge session"):
         await services["remote_start"](MockServiceCall({"charger_id": charger_id}))
+
+
+@pytest.mark.asyncio
+async def test_await_command_retries_on_transient_404():
+    """Test await_command retries on transient 404 error during command polling."""
+    from custom_components.roulezelectrique.api import NotFoundError, RoulezElectriqueApiClient
+
+    session = MagicMock()
+    client = RoulezElectriqueApiClient(session, "https://example.com", "token")
+
+    # First call returns 404, second call returns accepted command
+    client.get_command = AsyncMock(
+        side_effect=[
+            NotFoundError("Resource not found: No query results for model [App\\Models\\OcppCommand] 51887"),
+            {"id": 51887, "status": "accepted", "result": "Accepted"},
+        ]
+    )
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await client.await_command(51887)
+
+    assert result == {"id": 51887, "status": "accepted", "result": "Accepted"}
+    assert client.get_command.call_count == 2
+
