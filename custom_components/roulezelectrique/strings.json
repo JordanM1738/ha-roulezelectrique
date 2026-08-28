@@ -167,6 +167,9 @@
       },
       "lock": {
         "name": "Verrouiller"
+      },
+      "plug_and_charge": {
+        "name": "Plug & Charge"
       }
     },
     "number": {
@@ -180,6 +183,14 @@
     "button": {
       "refresh": {
         "name": "Actualiser"
+      },
+      "reboot": {
+        "name": "Redémarrer (interrompt la charge en cours)"
+      }
+    },
+    "select": {
+      "time_zone": {
+        "name": "Fuseau horaire"
       }
     }
   }

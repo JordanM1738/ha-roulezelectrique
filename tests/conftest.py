@@ -385,6 +385,66 @@ BASELINE_CHARGER_FULL: dict[str, Any] = {
     "diagnostics": {},
 }
 
+# ---------------------------------------------------------------------------
+# IYILO-only borne settings fixtures (0.9.0+): `plug_and_charge`,
+# `time_zone_value` and `settings_controllable` are ALWAYS present on the
+# per-charger dict (bool|null, str|null, bool respectively — see
+# switch.py/select.py/button.py module docstrings), and the three
+# capability strings ("plug_and_charge", "time_zone", "reboot") gate entity
+# creation. IYILO is the vendor this repo calls "ave" on the wire.
+# ---------------------------------------------------------------------------
+
+# Top-level `time_zones` list from the state envelope (see coordinator.py).
+TIME_ZONES: list[dict[str, Any]] = [
+    {"value": "America/Toronto", "label": "Eastern Time (Toronto)"},
+    {"value": "America/Vancouver", "label": "Pacific Time (Vancouver)"},
+    {"value": "America/Winnipeg", "label": "Central Time (Winnipeg)"},
+]
+
+# A fully settings-controllable IYILO borne: all three capabilities present,
+# a known current time-zone value, Plug & Charge enabled.
+AVE_CHARGER_WITH_SETTINGS: dict[str, Any] = {
+    **AVE_CHARGER,
+    "id": 30,
+    "serial_number": "AVE-SETTINGS001",
+    "settings_controllable": True,
+    "plug_and_charge": True,
+    "time_zone_value": "America/Toronto",
+    "capabilities": ["plug_and_charge", "time_zone", "reboot"],
+}
+
+# Same borne, but the current time-zone value is NOT among the server's
+# known `time_zones` (a value IYILO reports that TIME_ZONES doesn't carry —
+# see select.py's module docstring on never dropping it silently).
+AVE_CHARGER_UNKNOWN_TIME_ZONE: dict[str, Any] = {
+    **AVE_CHARGER_WITH_SETTINGS,
+    "id": 31,
+    "serial_number": "AVE-SETTINGS002",
+    "time_zone_value": "America/Regina",
+}
+
+# Same borne, but the account is inactive / the borne is retired:
+# settings_controllable is False even though it still carries all three
+# capabilities — every new entity must render unavailable, not just the
+# charge switch.
+AVE_CHARGER_SETTINGS_UNCONTROLLABLE: dict[str, Any] = {
+    **AVE_CHARGER_WITH_SETTINGS,
+    "id": 32,
+    "serial_number": "AVE-SETTINGS003",
+    "settings_controllable": False,
+}
+
+# Never-reported state: capabilities present (so the entities are created),
+# but the server has never observed a value for either setting (null/null) —
+# used for the switch/select "unknown state" availability rule.
+AVE_CHARGER_SETTINGS_NEVER_REPORTED: dict[str, Any] = {
+    **AVE_CHARGER_WITH_SETTINGS,
+    "id": 33,
+    "serial_number": "AVE-SETTINGS004",
+    "plug_and_charge": None,
+    "time_zone_value": None,
+}
+
 ACCOUNT_DATA: dict[str, Any] = {
     "rewards": {
         "client": 12.50,
@@ -429,6 +489,15 @@ STATE_ENVELOPE_NO_ACCOUNT: dict[str, Any] = {
     "generated_at": "2026-06-17T10:00:00+00:00",
     "poll_interval_seconds": 30,
     "chargers": [OCPP_CHARGER],
+}
+
+# Envelope carrying the top-level `time_zones` list (0.9.0+).
+STATE_ENVELOPE_WITH_TIME_ZONES: dict[str, Any] = {
+    "generated_at": "2026-06-17T10:00:00+00:00",
+    "poll_interval_seconds": 30,
+    "chargers": [AVE_CHARGER_WITH_SETTINGS],
+    "account": None,
+    "time_zones": TIME_ZONES,
 }
 
 COMMAND_QUEUED: dict[str, Any] = {"id": 99, "status": "queued", "result": None, "error": None}

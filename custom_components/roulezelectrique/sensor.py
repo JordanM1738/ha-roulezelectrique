@@ -46,6 +46,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -57,7 +58,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
@@ -161,6 +161,14 @@ KNOWN_CAPABILITIES = frozenset(
         "configured_current_limit",
         "heartbeat_interval",
         "meter_sample_interval",
+        # IYILO-only borne settings ("ave" on the wire): gate switch.py's
+        # Plug & Charge switch, select.py's time-zone select and button.py's
+        # reboot button respectively. None has a dedicated
+        # RoulezElectriqueSensorDescription — required in this set purely for
+        # the two-repo contract check below, same as "plugged_in".
+        "plug_and_charge",
+        "time_zone",
+        "reboot",
     }
 )
 

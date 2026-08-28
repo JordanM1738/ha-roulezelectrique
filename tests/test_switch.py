@@ -27,10 +27,16 @@ from custom_components.roulezelectrique.api import ConnectError, OfflineError, R
 from custom_components.roulezelectrique.const import DOMAIN
 from custom_components.roulezelectrique.switch import RoulezElectriqueSwitch
 
-from custom_components.roulezelectrique.switch import RoulezElectriqueLockSwitch
+from custom_components.roulezelectrique.switch import (
+    RoulezElectriqueLockSwitch,
+    RoulezElectriquePlugAndChargeSwitch,
+)
 
 from .conftest import (
     AVE_CHARGER,
+    AVE_CHARGER_SETTINGS_NEVER_REPORTED,
+    AVE_CHARGER_SETTINGS_UNCONTROLLABLE,
+    AVE_CHARGER_WITH_SETTINGS,
     COMMAND_ACCEPTED,
     COMMAND_REJECTED,
     COMMAND_TIMEOUT,
@@ -70,6 +76,33 @@ def _make_lock_switch(
     client.await_command = AsyncMock(return_value=COMMAND_ACCEPTED)
 
     switch = RoulezElectriqueLockSwitch(coordinator, client, charger_id)
+    switch.async_write_ha_state = MagicMock()
+    return switch, coordinator
+
+
+def _make_plug_and_charge_switch(
+    charger_data: dict[str, Any],
+    set_return=None,
+    set_side_effect=None,
+) -> tuple[RoulezElectriquePlugAndChargeSwitch, MagicMock]:
+    """Create a Plug & Charge switch with mocked coordinator + client."""
+    from custom_components.roulezelectrique.coordinator import CoordinatorData
+
+    charger_id = charger_data["id"]
+    coordinator = MagicMock()
+    coordinator.data = CoordinatorData(chargers={charger_id: charger_data}, account=None)
+    coordinator.last_update_success = True
+    coordinator._listeners = {}
+    coordinator.async_request_refresh = AsyncMock()
+
+    client = MagicMock()
+    if set_side_effect is not None:
+        client.set_ave_plug_and_charge = AsyncMock(side_effect=set_side_effect)
+    else:
+        client.set_ave_plug_and_charge = AsyncMock(return_value=set_return or SYNC_ACCEPTED)
+    client.await_command = AsyncMock(return_value=COMMAND_ACCEPTED)
+
+    switch = RoulezElectriquePlugAndChargeSwitch(coordinator, client, charger_id)
     switch.async_write_ha_state = MagicMock()
     return switch, coordinator
 
@@ -613,6 +646,146 @@ async def test_lock_switch_rate_limited_raises():
 @pytest.mark.asyncio
 async def test_lock_switch_lock_prevents_overlap():
     switch, _ = _make_lock_switch(WALLBOX_CHARGER)
+    async with switch._lock:
+        with pytest.raises(HomeAssistantError, match="in progress"):
+            await switch.async_turn_on()
+
+
+# ---------------------------------------------------------------------------
+# Plug & Charge switch (IYILO-only, capability-gated)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_setup_creates_plug_and_charge_switch_only_with_capability():
+    """async_setup_entry creates the Plug & Charge switch only for chargers
+    whose `capabilities` list contains "plug_and_charge" — absent for a
+    regular AVE charger with no `capabilities` key and for OCPP."""
+    from custom_components.roulezelectrique.switch import async_setup_entry
+    from custom_components.roulezelectrique.coordinator import CoordinatorData
+
+    coordinator = MagicMock()
+    coordinator.data = CoordinatorData(
+        chargers={
+            1: OCPP_CHARGER,
+            4: AVE_CHARGER,
+            30: AVE_CHARGER_WITH_SETTINGS,
+        },
+        account=None,
+    )
+
+    hass = MagicMock()
+    entry_id = "entry_id"
+    hass.data = {DOMAIN: {entry_id: coordinator, f"{entry_id}_client": MagicMock()}}
+    entry = MagicMock()
+    entry.entry_id = entry_id
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities, **kw: added.extend(entities))
+
+    pnc_switches = [e for e in added if isinstance(e, RoulezElectriquePlugAndChargeSwitch)]
+    assert len(pnc_switches) == 1
+    assert pnc_switches[0]._charger_id == 30
+
+
+def test_plug_and_charge_switch_reflects_enabled_state():
+    switch, _ = _make_plug_and_charge_switch(AVE_CHARGER_WITH_SETTINGS)
+    assert switch.available is True
+    assert switch.is_on is True
+
+
+def test_plug_and_charge_switch_unavailable_when_never_reported():
+    """No optimistic overlay and plug_and_charge is null → unavailable, same
+    "unknown state" rule as the lock switch."""
+    switch, _ = _make_plug_and_charge_switch(AVE_CHARGER_SETTINGS_NEVER_REPORTED)
+    assert switch.available is False
+
+
+def test_plug_and_charge_switch_unavailable_when_settings_uncontrollable():
+    """settings_controllable=False → unavailable, even though the charge
+    switch on the same borne might still be controllable."""
+    switch, _ = _make_plug_and_charge_switch(AVE_CHARGER_SETTINGS_UNCONTROLLABLE)
+    assert switch.available is False
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_turn_on_accepted():
+    switch, coordinator = _make_plug_and_charge_switch(AVE_CHARGER_WITH_SETTINGS)
+
+    await switch.async_turn_on()
+
+    switch._client.set_ave_plug_and_charge.assert_awaited_once_with(30, True)
+    coordinator.async_request_refresh.assert_awaited_once()
+    assert switch._optimistic_enabled is None
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_turn_off_accepted():
+    switch, coordinator = _make_plug_and_charge_switch(AVE_CHARGER_WITH_SETTINGS)
+
+    await switch.async_turn_off()
+
+    switch._client.set_ave_plug_and_charge.assert_awaited_once_with(30, False)
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_offline_409_reverts():
+    switch, coordinator = _make_plug_and_charge_switch(
+        AVE_CHARGER_WITH_SETTINGS, set_side_effect=OfflineError("offline")
+    )
+
+    with pytest.raises(HomeAssistantError, match="offline"):
+        await switch.async_turn_on()
+
+    assert switch._optimistic_enabled is None
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_rate_limited_429_reverts():
+    switch, _ = _make_plug_and_charge_switch(
+        AVE_CHARGER_WITH_SETTINGS, set_side_effect=RateLimitedError(retry_after=45)
+    )
+
+    with pytest.raises(HomeAssistantError, match="Too many requests"):
+        await switch.async_turn_on()
+
+    assert switch._optimistic_enabled is None
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_vendor_error_502_reverts():
+    """A vendor-side failure (502 vendor_error) surfaces as a generic
+    ConnectError from the API client — caught by the broad except clause,
+    optimistic state reverted, HomeAssistantError raised."""
+    switch, _ = _make_plug_and_charge_switch(
+        AVE_CHARGER_WITH_SETTINGS,
+        set_side_effect=ConnectError("Server error 502: vendor_error"),
+    )
+
+    with pytest.raises(HomeAssistantError, match="Could not change Plug"):
+        await switch.async_turn_on()
+
+    assert switch._optimistic_enabled is None
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_rejected_reverts():
+    switch, coordinator = _make_plug_and_charge_switch(
+        AVE_CHARGER_WITH_SETTINGS, set_return={"id": None, "status": "rejected", "synchronous": True}
+    )
+
+    with pytest.raises(HomeAssistantError, match="rejected"):
+        await switch.async_turn_on()
+
+    assert switch._optimistic_enabled is None
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_plug_and_charge_lock_prevents_overlap():
+    switch, _ = _make_plug_and_charge_switch(AVE_CHARGER_WITH_SETTINGS)
     async with switch._lock:
         with pytest.raises(HomeAssistantError, match="in progress"):
             await switch.async_turn_on()

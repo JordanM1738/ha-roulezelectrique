@@ -482,6 +482,20 @@ def test_every_sensor_capability_is_a_known_capability():
         )
 
 
+def test_iyilo_settings_capabilities_are_known():
+    """`plug_and_charge`, `time_zone` and `reboot` are NOT driven by any
+    SENSOR_DESCRIPTIONS entry — they gate switch.py's Plug & Charge switch,
+    select.py's time-zone select and button.py's reboot button respectively —
+    so test_every_sensor_capability_is_a_known_capability above never
+    exercises them. Assert them directly, so a rename on the PHP side
+    (HomeAssistantController::CAP_PLUG_AND_CHARGE / CAP_TIME_ZONE /
+    CAP_REBOOT) still fails a test here.
+    """
+    assert "plug_and_charge" in KNOWN_CAPABILITIES
+    assert "time_zone" in KNOWN_CAPABILITIES
+    assert "reboot" in KNOWN_CAPABILITIES
+
+
 def test_every_sensor_translation_key_is_translated():
     """A description whose translation_key is missing from strings.json or a
     translations/ file renders as an unnamed entity in that language.

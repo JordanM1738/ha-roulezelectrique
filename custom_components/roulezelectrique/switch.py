@@ -1,12 +1,21 @@
 """Switch platform for the Roulez Électrique integration.
 
-Two switch types:
+Three switch types:
   - Charge switch: created for every CONTROLLABLE-capable charger — OCPP,
     Wallbox, AVE and Sigenergy (AC + DC) bornes. on = charging; toggling
     calls remote-start/stop.
   - Lock switch: Wallbox ONLY — on = borne locked; toggling calls POST
     /chargers/{id}/lock {locked}. OCPP/AVE/Sigenergy have no lock concept (no
     lock switch).
+  - Plug & Charge switch: IYILO ONLY (server capability "plug_and_charge";
+    IYILO is the vendor this repo calls "ave" on the wire, same as the
+    charge switch's gate below) — on = Plug & Charge enabled; toggling calls
+    POST /chargers/{id}/ave/plug-and-charge {enabled}. Gated on the
+    capability string, not on the vendor directly, so a future server that
+    stops or starts advertising it needs no client change. Unlike the charge
+    switch above, availability follows `settings_controllable` (a SEPARATE
+    flag from `controllable` — an inactive IYILO account or a retired borne
+    can be online/controllable for charging yet not settings-controllable).
 
 The server's `controllable` predicate decides runtime availability (OCPP: live
 WebSocket; Wallbox/AVE: active account; Sigenergy AC/DC: active linked
@@ -51,6 +60,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -92,6 +102,17 @@ async def async_setup_entry(
         is_wallbox = charger_data.get("vendor") == "wallbox"
         is_ave = charger_data.get("vendor") == "ave"
         is_sigenergy = charger_data.get("vendor") == "sigenergy"
+
+        # Plug & Charge switch: gated on the capability string, checked
+        # BEFORE the controllable-capable `continue` below so it is never
+        # accidentally skipped — in practice only IYILO ("ave") ever carries
+        # this capability, and IYILO is always controllable-capable, but the
+        # capability is the source of truth, not the vendor check.
+        if "plug_and_charge" in charger_data.get("capabilities", []):
+            entities.append(
+                RoulezElectriquePlugAndChargeSwitch(coordinator, client, charger_id)
+            )
+
         if not (charger_data.get("is_ocpp") or is_wallbox or is_ave or is_sigenergy):
             _LOGGER.debug(
                 "Charger %s is not controllable-capable — no switch entity created",
@@ -396,4 +417,125 @@ class RoulezElectriqueLockSwitch(RoulezElectriqueEntity, SwitchEntity):
 
             # Accepted — refresh so `locked` reflects the new state.
             self._optimistic_locked = None
+            await self.coordinator.async_request_refresh()
+
+
+class RoulezElectriquePlugAndChargeSwitch(RoulezElectriqueEntity, SwitchEntity):
+    """A switch that enables/disables IYILO's Plug & Charge on a borne.
+
+    IYILO-only (server capability "plug_and_charge"; IYILO is the vendor
+    this repo calls "ave" on the wire). on = Plug & Charge enabled. Toggling
+    calls POST /chargers/{id}/ave/plug-and-charge {enabled} — a SYNCHRONOUS
+    IYILO cloud call, same {id: null, status: "accepted", synchronous: true}
+    contract as the Wallbox lock switch above, so it follows the exact same
+    optimistic-write-then-revert pattern. A per-instance asyncio.Lock
+    prevents overlapping commands.
+
+    Filed under Configuration (EntityCategory.CONFIG): this is a borne
+    setting, not one of the primary charge/lock controls.
+    """
+
+    _attr_translation_key = "plug_and_charge"
+    _attr_device_class = SwitchDeviceClass.SWITCH
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: RoulezElectriqueCoordinator,
+        client: RoulezElectriqueApiClient,
+        charger_id: int,
+    ) -> None:
+        super().__init__(coordinator, charger_id)
+        self._client = client
+        self._attr_unique_id = f"{charger_id}_plug_and_charge"
+        self._lock = asyncio.Lock()
+        # Optimistic state overlay: None = use coordinator data.
+        self._optimistic_enabled: bool | None = None
+
+    async def _resolve_command(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Plug & Charge is a synchronous IYILO call; only poll a real id."""
+        if result.get("synchronous") or result.get("id") is None:
+            return result
+        return await self._client.await_command(result["id"])
+
+    @property
+    def available(self) -> bool:
+        """Available only when settings are controllable on this borne.
+
+        `settings_controllable` is a SEPARATE flag from `controllable` (the
+        charge switch's gate) — an inactive IYILO account or a retired borne
+        makes settings uncontrollable independently of charging control.
+        Also unavailable when the server has never reported a
+        `plug_and_charge` value (null) AND no optimistic overlay is set —
+        same "unknown state" rule as the lock switch above.
+        """
+        if not super().available:
+            return False
+        if not bool(self._charger_data.get("settings_controllable")):
+            return False
+        if self._optimistic_enabled is not None:
+            return True
+        return self._charger_data.get("plug_and_charge") is not None
+
+    @property
+    def is_on(self) -> bool:
+        """True when Plug & Charge is enabled."""
+        if self._optimistic_enabled is not None:
+            return self._optimistic_enabled
+        return bool(self._charger_data.get("plug_and_charge"))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable Plug & Charge."""
+        await self._set_enabled(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable Plug & Charge."""
+        await self._set_enabled(False)
+
+    async def _set_enabled(self, enabled: bool) -> None:
+        """Send a Plug & Charge on/off command (fail-closed, single-flight)."""
+        if self._lock.locked():
+            raise HomeAssistantError(
+                "A command is already in progress for this charger"
+            )
+
+        async with self._lock:
+            self._optimistic_enabled = enabled
+            self.async_write_ha_state()
+
+            try:
+                result = await self._client.set_ave_plug_and_charge(
+                    self._charger_id, enabled
+                )
+                cmd = await self._resolve_command(result)
+            except OfflineError as err:
+                self._optimistic_enabled = None
+                self.async_write_ha_state()
+                raise HomeAssistantError(
+                    "Charger is offline — cannot change Plug & Charge"
+                ) from err
+            except RateLimitedError as err:
+                self._optimistic_enabled = None
+                self.async_write_ha_state()
+                raise HomeAssistantError(
+                    f"Too many requests — please wait {err.retry_after}s before retrying"
+                ) from err
+            except (ConnectError, Exception) as err:  # noqa: BLE001
+                self._optimistic_enabled = None
+                self.async_write_ha_state()
+                raise HomeAssistantError(
+                    f"Could not change Plug & Charge: {err}"
+                ) from err
+
+            final_status = cmd.get("status", "")
+            if final_status != "accepted":
+                self._optimistic_enabled = None
+                self.async_write_ha_state()
+                error_detail = cmd.get("error") or cmd.get("result") or final_status
+                raise HomeAssistantError(
+                    f"Plug & Charge command {final_status}: {error_detail}"
+                )
+
+            # Accepted — refresh so `plug_and_charge` reflects the new state.
+            self._optimistic_enabled = None
             await self.coordinator.async_request_refresh()

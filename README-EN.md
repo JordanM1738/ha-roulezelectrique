@@ -12,14 +12,16 @@ One HA **device per charger**, plus one **Account** device for program-level sta
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **OCPP** (any OCPP 1.6J charger connected to the platform) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Wallbox** (linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **AVE** (linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **IYILO** (formerly AVE; linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Tesla** Wall Connector (linked account) | ✅ | ✅ | ✅ | ✅ | — | — | — |
 | **Sigenergy AC** (linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Sigenergy DC** (linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 
-Control availability is decided **server-side** (the platform's `controllable` / `current_limit_controllable` flags): an OCPP charger must be online (live WebSocket), and cloud vendors (Wallbox, AVE, Sigenergy AC and DC) need an active linked account. When control is temporarily unavailable, the entity exists but shows as *unavailable* — it never fails silently.
+Control availability is decided **server-side** (the platform's `controllable` / `current_limit_controllable` flags): an OCPP charger must be online (live WebSocket), and cloud vendors (Wallbox, IYILO, Sigenergy AC and DC) need an active linked account. When control is temporarily unavailable, the entity exists but shows as *unavailable* — it never fails silently.
 
-**New in v0.5.0:** Sigenergy AC and DC now get the start/stop switch (through the same synchronous call as Wallbox/AVE — the platform branches AC vs DC internally). Only Sigenergy AC keeps the max-current slider; there is no current-limit API for DC.
+**New in v0.9.0:** three IYILO-only borne settings — Plug & Charge, time zone and reboot — see *Entities* below.
+
+**New in v0.5.0:** Sigenergy AC and DC now get the start/stop switch (through the same synchronous call as Wallbox/IYILO — the platform branches AC vs DC internally). Only Sigenergy AC keeps the max-current slider; there is no current-limit API for DC.
 
 Extra per-vendor sensors (below) are created **only for the chargers that can report them** — a Tesla Wall Connector never gets a temperature sensor, a Wallbox never gets a VIN sensor, etc. This is decided by the platform, per charger (via the `capabilities` list the server returns for each charger), so it stays correct automatically as the platform adds vendors or new capabilities — including the **Plugged in** binary sensor, which is also fully capability-driven as of v0.5.0 (see below).
 
@@ -27,7 +29,7 @@ Extra per-vendor sensors (below) are created **only for the chargers that can re
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **OCPP** | ✅ | — | rare¹ | rare¹ | ✅ | ✅ | — | — | — |
 | **Wallbox** | ✅ | — | — | — | ✅ | — | ✅ | — | — |
-| **AVE** | ✅ | — | — | — | — | ✅ | — | — | — |
+| **IYILO** | ✅ | — | — | — | — | ✅ | — | — | — |
 | **Tesla** | ✅ | — | — | — | — | — | — | — | ✅ |
 | **Sigenergy AC** | ✅ | ✅ | ✅ | — | — | ✅ | — | ✅ | — |
 | **Sigenergy DC** | ✅ | — | — | — | — | — | — | — | — |
@@ -53,7 +55,7 @@ Extra per-vendor sensors (below) are created **only for the chargers that can re
 - **Battery level** (%) — OCPP only, when the charger reports it (rare)
 - **Measured current** (A) — Sigenergy AC only; the *live* draw, separate from the "Current" sensor above, which stays the configured limit
 - **Last connection** (timestamp) — OCPP, Wallbox
-- **Session start** (timestamp) — OCPP, AVE, Sigenergy AC (not available from Wallbox's cloud)
+- **Session start** (timestamp) — OCPP, IYILO, Sigenergy AC (not available from Wallbox's cloud)
 - **Charging speed** (km/h) and **Added range** (km) — Wallbox only
 - **Connection type** (ethernet/wifi/cellular) — Sigenergy AC only
 - **VIN** — Tesla only, the connected vehicle's VIN
@@ -71,13 +73,18 @@ Telemetry sensors (power, energy, current, voltage, temperature, battery level, 
 **Binary sensors**
 - **Online** (connectivity) — all vendors
 - **Charging** — all vendors
-- **Plugged in** — driven by the platform's `capabilities` list rather than a hardcoded vendor list; currently covers OCPP, Wallbox, AVE, Tesla and Sigenergy AC/DC
+- **Plugged in** — driven by the platform's `capabilities` list rather than a hardcoded vendor list; currently covers OCPP, Wallbox, IYILO, Tesla and Sigenergy AC/DC
 
 **Controls**
-- **Charge switch** (start/stop) — OCPP, Wallbox, AVE, Sigenergy AC and DC. Commands are confirmed end-to-end: OCPP commands are polled until the charger accepts/rejects; the other vendors respond synchronously (the result is already known in the response); failures surface as an HA error toast and the switch reverts (no fake state).
-- **Max current** (number slider, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, AVE, Sigenergy AC. **EVduty/Elmec chargers get a separate slider** ("Max current (EVduty)"): their firmware is OCPP "Core"-only and rejects `SetChargingProfile` outright, so the server applies the value by writing the charger's `MaxCurrent` setting instead. Two consequences specific to that path — applying a value **reboots the charger for 30-60 s** (that reboot is what makes it take effect), and the command is **refused while a session is in progress**. Its ceiling is the installation baseline captured from the charger, never higher. A charger shows one slider or the other, never both. Bounds come from the server (typically 6 A up to the charger's max). Since v0.6.0, when an OCPP charger reports its own hardware current limit in its configuration, that value is used as the ceiling — for example, Wallbox Pulsar Plus chargers on OCPP that report 48 A now get a 48 A ceiling instead of the generic 32 A default. Not available for Sigenergy DC (no current-limit API on the DC side).
+- **Charge switch** (start/stop) — OCPP, Wallbox, IYILO, Sigenergy AC and DC. Commands are confirmed end-to-end: OCPP commands are polled until the charger accepts/rejects; the other vendors respond synchronously (the result is already known in the response); failures surface as an HA error toast and the switch reverts (no fake state).
+- **Max current** (number slider, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, IYILO, Sigenergy AC. **EVduty/Elmec chargers get a separate slider** ("Max current (EVduty)"): their firmware is OCPP "Core"-only and rejects `SetChargingProfile` outright, so the server applies the value by writing the charger's `MaxCurrent` setting instead. Two consequences specific to that path — applying a value **reboots the charger for 30-60 s** (that reboot is what makes it take effect), and the command is **refused while a session is in progress**. Its ceiling is the installation baseline captured from the charger, never higher. A charger shows one slider or the other, never both. Bounds come from the server (typically 6 A up to the charger's max). Since v0.6.0, when an OCPP charger reports its own hardware current limit in its configuration, that value is used as the ceiling — for example, Wallbox Pulsar Plus chargers on OCPP that report 48 A now get a 48 A ceiling instead of the generic 32 A default. Not available for Sigenergy DC (no current-limit API on the DC side).
 - **Lock switch** — Wallbox only (on = locked).
+- **Plug & Charge switch** — **new in v0.9.0, IYILO only.** Turns the borne's Plug & Charge setting on/off. Filed under the device's Configuration section (a setting, not a primary charge control).
+- **Time zone** (select) — **new in v0.9.0, IYILO only.** Shows and sets the borne's configured time zone. The list of choices comes from the platform; if the borne is currently set to a time zone the platform doesn't offer as a choice, that value is still shown (never silently swapped for something else) — you just can't pick it again from the list unless the platform starts offering it. Filed under Configuration.
+- **Reboot** (button) — **new in v0.9.0, IYILO only.** Power-cycles the physical charger and **interrupts any charging session in progress** — this is a real, disruptive action, not a diagnostic refresh. Home Assistant does not ask for confirmation before running a button press, and a button can also be fired by a script, an automation or a voice assistant. It is therefore **disabled by default**: find it under the device's Configuration section, open it and enable it once, deliberately, before it can be pressed at all. It is **not** blocked while a session is running — a borne stuck in a phantom session is exactly when you need to restart it.
 - **Refresh** (button) — **new.** Every charger. Press it to force an immediate re-check of the server's data — the only entity in this integration that never depends on `controllable`/vendor and is always available. Useful for a change made outside Home Assistant (e.g. from the Roulez Électrique mobile app), which otherwise only shows up in HA on the next scheduled poll (see **Update interval** below). Home Assistant Core's built-in "Update entity" action (`homeassistant.update_entity`, available from the entity's more-info dialog or in automations/scripts) does the exact same thing and works too — this button is simply a one-tap shortcut for it from the companion app.
+
+All three IYILO settings above (Plug & Charge, time zone, reboot) go *unavailable* together whenever settings on that borne aren't controllable right now (an inactive IYILO account or a retired borne) — a separate condition from the charge switch's own availability, since a borne can be reachable for charging control while its settings are not.
 
 ### Account device
 
@@ -96,7 +103,7 @@ Use each charger's **Lifetime energy** sensor as the source when adding a charge
 
 ## Requirements
 
-- Home Assistant **2024.1.0** or later
+- Home Assistant **2024.11.0** or later
 - A Roulez Électrique account at [roulezelectrique.club](https://roulezelectrique.club)
 - An API token from your profile (see Setup)
 
@@ -162,10 +169,11 @@ The integration supports HA's built-in diagnostics download (Settings → Device
 
 - **From v0.2.4 or earlier:** the account-level sensors (rewards, invitations, lifetime energy, charger count) had a duplicated internal ID that is corrected automatically the first time the integration reloads after upgrading — your existing entities, their history, and any dashboards/automations referencing them are preserved (no re-adding, no new entity).
 - **From v0.3.x:** new per-charger sensors (Lifetime energy, Lifetime sessions, Temperature, Battery level, Measured current, Last connection, Session start, Charging speed, Added range, Connection type, VIN) appear automatically on the first reload for every charger whose vendor can report them — no re-adding, no configuration change needed. Existing entity IDs are untouched, but the account-level **Lifetime energy** sensor's state class changes from `total_increasing` to `total` (it can now be corrected downward, e.g. after a data cleanup, without Home Assistant misreading that as a meter reset). Home Assistant may log a one-time "statistics metadata changed" notice for that sensor when this happens — this is expected and harmless; its long-term statistics and history keep working normally.
-- **From v0.4.x:** Sigenergy AC and DC now get the start/stop switch (remote control, requires an active linked account), and the **Plugged in** binary sensor now also covers OCPP and Sigenergy AC/DC (previously limited to Wallbox/AVE/Tesla). These new entities appear automatically on the first reload for the affected chargers — no re-adding, no configuration change needed.
+- **From v0.4.x:** Sigenergy AC and DC now get the start/stop switch (remote control, requires an active linked account), and the **Plugged in** binary sensor now also covers OCPP and Sigenergy AC/DC (previously limited to Wallbox/IYILO/Tesla). These new entities appear automatically on the first reload for the affected chargers — no re-adding, no configuration change needed.
 - **From v0.5.x:** six new OCPP diagnostic sensors (Wi-Fi signal, Maximum charge level, Minimum charge level, Charger current limit, Heartbeat interval, Meter sample interval) appear for eligible OCPP chargers on the first reload after their configuration is next read hourly — no re-adding, no configuration change needed (see *Entities* above for the per-charger detail and default enablement).
 
 ---
+- **From v0.8.x:** IYILO chargers get three new entities — the **Plug & Charge** switch, the **Time zone** select and the **Reboot** button (see *Entities* above), appearing automatically on the first reload after upgrading, except **Reboot**, which ships disabled and must be enabled by hand. This integration also gains its first **select** entity type, so any automation or script that filters entities by domain (e.g. `switch.*` only) should be aware a `select.*` entity now exists per IYILO charger. Every other vendor is unaffected. These entities also require the platform-side update to be live; until then they simply do not appear.
 
 ## Known limitations
 
@@ -175,6 +183,7 @@ The integration supports HA's built-in diagnostics download (Settings → Device
 - **WiFi signal strength via a vendor's cloud API is not available for any charger, from any vendor.** Tesla's own device does report a signal-strength value, but only over its local network API on the same LAN — the cloud API this platform reads from does not carry it, so there is no way to surface it here for Tesla or any other vendor through that path. The **Wi-Fi signal** diagnostic sensor described above is a different thing: it comes from the `GetConfiguration` data an OCPP charger reports about itself (e.g. Wallbox Pulsar Plus on OCPP), not a live cloud API, so it only exists for OCPP chargers that report it.
 - **Temperature** and **Battery level** sensors on OCPP chargers only show a value for the small number of chargers whose firmware actually reports those readings; most read *unknown* permanently, which is expected (the sensor is still created so it starts working the moment a charger begins reporting it).
 - The integration ships its own brand icon/logo (`brand/` folder, supported since Home Assistant 2026.3.0). On older HA versions the integration works fine but shows without a logo.
+- **Plug & Charge, time zone and reboot are IYILO-only** — no other vendor's chargers get these entities, by design (the platform does not expose this kind of setting for OCPP, Wallbox, Tesla or Sigenergy). The Reboot button has no built-in confirmation step (Home Assistant does not offer one for buttons), which is why it ships disabled until you enable it yourself. The platform also deliberately does **not** expose firmware update control for any vendor — Reboot only restarts the charger with its current firmware.
 
 ---
 

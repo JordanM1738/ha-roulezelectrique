@@ -40,6 +40,15 @@ API_COMMAND_POLL_PATH = "/api/v1/commands/{command_id}"
 # (php max_execution_time 60s / nginx fastcgi_read_timeout 120s).
 MAX_CURRENT_REQUEST_TIMEOUT = 75  # seconds
 
+# IYILO-only settings (server calls this vendor "ave" on the wire — see
+# switch.py's charge switch gate). All three are FULLY SYNCHRONOUS, same
+# contract as remote-start/remote-stop/lock above: the response IS the
+# outcome, never a command id to poll. Gated server-side on the
+# per-charger `plug_and_charge`/`time_zone`/`reboot` capability strings.
+API_AVE_PLUG_AND_CHARGE_PATH = "/api/v1/chargers/{charger_id}/ave/plug-and-charge"
+API_AVE_TIMEZONE_PATH = "/api/v1/chargers/{charger_id}/ave/timezone"
+API_AVE_REBOOT_PATH = "/api/v1/chargers/{charger_id}/ave/reboot"
+
 # Default current bounds for the power-limit number entity, used when the
 # server omits them (older server / read failure). The server validates
 # min:6 / max:maxControlAmps, so 6 is the hard floor everywhere.
@@ -57,4 +66,4 @@ COMMAND_TERMINAL_STATUSES = {"accepted", "rejected", "timeout", "failed"}
 COORDINATOR_CHARGERS_KEY = "chargers"
 
 # Platforms
-PLATFORMS = ["binary_sensor", "button", "number", "sensor", "switch"]
+PLATFORMS = ["binary_sensor", "button", "number", "select", "sensor", "switch"]

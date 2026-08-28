@@ -16,6 +16,8 @@ from .conftest import (
     STATE_ENVELOPE,
     STATE_ENVELOPE_EMPTY,
     STATE_ENVELOPE_MULTI,
+    STATE_ENVELOPE_WITH_TIME_ZONES,
+    TIME_ZONES,
 )
 
 
@@ -38,7 +40,7 @@ def _make_coordinator(state_return=None, state_side_effect=None):
 
     coordinator = RoulezElectriqueCoordinator.__new__(RoulezElectriqueCoordinator)
     coordinator.client = client
-    coordinator._entry = entry
+    coordinator.config_entry = entry
     coordinator.data = None
     coordinator.update_interval = timedelta(seconds=DEFAULT_SCAN_INTERVAL)
     coordinator.hass = hass
@@ -87,6 +89,31 @@ async def test_coordinator_empty_roster():
 
     assert result.chargers == {}
     assert result.account is None
+
+
+# ---------------------------------------------------------------------------
+# time_zones: top-level list (0.9.0+)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_coordinator_parses_top_level_time_zones():
+    """A server that sends `time_zones` → CoordinatorData.time_zones carries
+    it verbatim."""
+    coordinator = _make_coordinator(state_return=STATE_ENVELOPE_WITH_TIME_ZONES)
+    result = await coordinator._async_update_data()
+
+    assert result.time_zones == TIME_ZONES
+
+
+@pytest.mark.asyncio
+async def test_coordinator_time_zones_defaults_to_empty_list():
+    """An older server that omits `time_zones` entirely → [], never None —
+    select.py must never have to special-case a missing key."""
+    coordinator = _make_coordinator(state_return=STATE_ENVELOPE)
+    result = await coordinator._async_update_data()
+
+    assert result.time_zones == []
 
 
 # ---------------------------------------------------------------------------

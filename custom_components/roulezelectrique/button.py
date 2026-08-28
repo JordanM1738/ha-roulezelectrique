@@ -1,35 +1,45 @@
 """Button platform for the Roulez Électrique integration.
 
-One "Refresh" button per charger device: pressing it calls
-`coordinator.async_request_refresh()` — the exact same call every write
-action (switch.py, number.py) already triggers on success — forcing an
-immediate re-poll of the server's cached state.
+Two button types:
+  - Refresh: one per charger device (every vendor). Pressing it calls
+    `coordinator.async_request_refresh()` — the exact same call every write
+    action (switch.py, number.py) already triggers on success — forcing an
+    immediate re-poll of the server's cached state. A local, no-side-effect
+    action: it never calls a vendor API and cannot itself fail.
+  - Reboot: IYILO ONLY (server capability "reboot"; IYILO is the vendor this
+    repo calls "ave" on the wire). Pressing it calls
+    POST /chargers/{id}/ave/reboot and DOES power-cycle the physical borne —
+    unlike Refresh, this has a real, disruptive side effect and interrupts
+    any charging session in progress. See the class docstring below for why
+    that matters here specifically (HA gives buttons no confirmation step).
 
-Why this exists: HA's own writes (start/stop, lock, set current) already
+Why Refresh exists: HA's own writes (start/stop, lock, set current) already
 self-refresh instantly, so HA→app changes are never stale. But a change made
 OUTSIDE Home Assistant (e.g. from the Roulez Électrique mobile app) is only
 ever picked up by HA's periodic poll (`DEFAULT_SCAN_INTERVAL` /
 the `scan_interval` option, see const.py), up to that many seconds later.
 Re-opening the HA companion app does NOT force a poll — it only re-reads HA
 Core's already-cached state — so there was previously no way for a user to
-force an immediate re-check from the app. This button is that action.
+force an immediate re-check from the app. Refresh is that action.
 
 `async_request_refresh()` only re-reads the server's already-cached state (see
 coordinator.py's module docstring) — it never calls a vendor API and cannot
 itself fail in a way that needs a fail-closed HomeAssistantError, unlike the
-switch/number write paths.
+switch/number write paths, and unlike Reboot below.
 """
 
 from __future__ import annotations
 
 import logging
 
-from homeassistant.components.button import ButtonEntity
+from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .api import ConnectError, OfflineError, RateLimitedError, RoulezElectriqueApiClient
 from .const import DOMAIN
 from .coordinator import RoulezElectriqueCoordinator
 from .entity import RoulezElectriqueEntity
@@ -42,14 +52,22 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up one refresh button per charger device."""
+    """Set up buttons from a config entry: one refresh button per charger
+    device, plus one reboot button for every IYILO-capable ("reboot"
+    capability) charger."""
     coordinator: RoulezElectriqueCoordinator = hass.data[DOMAIN][entry.entry_id]
+    client: RoulezElectriqueApiClient = hass.data[DOMAIN][f"{entry.entry_id}_client"]
 
     charger_map = coordinator.data.chargers if coordinator.data else {}
-    entities = [
+    entities: list[RoulezElectriqueEntity] = [
         RoulezElectriqueRefreshButton(coordinator, charger_id)
         for charger_id in charger_map
     ]
+    for charger_id, charger_data in charger_map.items():
+        if "reboot" in charger_data.get("capabilities", []):
+            entities.append(
+                RoulezElectriqueRebootButton(coordinator, client, charger_id)
+            )
     async_add_entities(entities)
 
 
@@ -85,4 +103,86 @@ class RoulezElectriqueRefreshButton(RoulezElectriqueEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Force an immediate coordinator refresh."""
+        await self.coordinator.async_request_refresh()
+
+
+class RoulezElectriqueRebootButton(RoulezElectriqueEntity, ButtonEntity):
+    """A button that IMMEDIATELY REBOOTS the physical IYILO borne.
+
+    IYILO-only (server capability "reboot"; IYILO is the vendor this repo
+    calls "ave" on the wire). Pressing it calls POST
+    /chargers/{id}/ave/reboot — a SYNCHRONOUS IYILO cloud call that
+    power-cycles the charger, interrupting any charging session in progress.
+
+    Home Assistant offers NO confirmation dialog for button entities — press
+    is fired the instant the tile/service is triggered, with no "are you
+    sure?" step anywhere in HA's own UI. This is therefore filed under
+    Configuration (EntityCategory.CONFIG, keeping it out of the primary
+    controls row) and uses the RESTART device class plus the strongest
+    icon/name wording HA allows on a button, so at least the label itself
+    warns before the tap that this is disruptive — there is no other guard
+    HA provides.
+    """
+
+    _attr_translation_key = "reboot"
+    _attr_icon = "mdi:restart-alert"
+    _attr_device_class = ButtonDeviceClass.RESTART
+    _attr_entity_category = EntityCategory.CONFIG
+    # DISABLED BY DEFAULT, deliberately. The website's own reboot control asks
+    # for a two-step confirmation first ("the charger restarts and briefly goes
+    # offline. An active charging session will stop." — lang/*/iyilo.php,
+    # reboot_confirm_detail); Home Assistant has no equivalent step for a
+    # button, and a button is reachable from a dashboard tap, a script, an
+    # automation and a voice assistant. Shipping it enabled would put a
+    # zero-confirmation power cycle of a real charger one misheard voice
+    # command away. Whoever wants it turns it on once in the entity settings,
+    # which is the deliberate act HA otherwise never asks for.
+    #
+    # NOT gated on "is it charging right now" on purpose: a borne stuck in a
+    # phantom session is exactly when an owner needs to reboot it, so refusing
+    # mid-charge would block the one recovery this button exists for.
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: RoulezElectriqueCoordinator,
+        client: RoulezElectriqueApiClient,
+        charger_id: int,
+    ) -> None:
+        super().__init__(coordinator, charger_id)
+        self._client = client
+        self._attr_unique_id = f"{charger_id}_reboot"
+
+    @property
+    def available(self) -> bool:
+        """Available only when settings are controllable on this borne.
+
+        `settings_controllable` — false for an inactive IYILO account or a
+        retired borne — is a SEPARATE flag from `controllable` (the charge
+        switch's gate); see switch.py's module docstring.
+        """
+        if not super().available:
+            return False
+        return bool(self._charger_data.get("settings_controllable"))
+
+    async def async_press(self) -> None:
+        """Reboot the borne now (fail-closed: any failure raises).
+
+        Raises HomeAssistantError if the charger is offline (409) or rate
+        limited (429), or on any other failure (including a 502 vendor
+        error).
+        """
+        try:
+            await self._client.reboot_ave_charger(self._charger_id)
+        except OfflineError as err:
+            raise HomeAssistantError(
+                "Charger is offline — cannot reboot"
+            ) from err
+        except RateLimitedError as err:
+            raise HomeAssistantError(
+                f"Too many requests — please wait {err.retry_after}s before retrying"
+            ) from err
+        except (ConnectError, Exception) as err:  # noqa: BLE001
+            raise HomeAssistantError(f"Could not reboot charger: {err}") from err
+
         await self.coordinator.async_request_refresh()

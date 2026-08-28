@@ -7,6 +7,10 @@ stored as a CoordinatorData object holding:
              (or None when the server does not return the account block — older
              server versions — so the component degrades gracefully: no account
              sensors are created, no crash)
+  - time_zones: TOP-LEVEL list of {"value": ..., "label": ...} for IYILO's
+                time-zone select (select.py) — `[]` when the server omits the
+                key (older server) or has nothing to offer (no IYILO borne on
+                the account, or the vendor call is unavailable)
 
 Error handling (fail-closed policy):
     401 AuthError         → ConfigEntryAuthFailed  (triggers reauth flow)
@@ -44,6 +48,12 @@ class CoordinatorData:
     # does not return it (older version) so consumers must tolerate None.
     account: dict[str, Any] | None = None
 
+    # TOP-LEVEL /state → "time_zones" key: list of {"value", "label"} dicts
+    # for IYILO's time-zone select. Always a list — [] when the server omits
+    # the key (older server) or has nothing to offer, never None, so
+    # select.py never has to special-case a missing key.
+    time_zones: list[dict[str, Any]] = field(default_factory=list)
+
 
 class RoulezElectriqueCoordinator(DataUpdateCoordinator[CoordinatorData]):
     """Coordinator that polls the Roulez Électrique state endpoint.
@@ -65,11 +75,11 @@ class RoulezElectriqueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(seconds=scan_interval),
         )
         self.client = client
-        self._entry = entry
 
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch and return coordinator data.
@@ -95,9 +105,9 @@ class RoulezElectriqueCoordinator(DataUpdateCoordinator[CoordinatorData]):
             raise UpdateFailed(f"Unexpected error from API: {err}") from err
 
         # Restore normal interval (may have been widened for rate-limit backoff).
-        scan_interval = self._entry.options.get(
+        scan_interval = self.config_entry.options.get(
             CONF_SCAN_INTERVAL,
-            self._entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+            self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
         self.update_interval = timedelta(seconds=scan_interval)
 
@@ -107,4 +117,8 @@ class RoulezElectriqueCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # account block is optional — tolerate older servers that omit it.
         account: dict[str, Any] | None = envelope.get("account") or None
 
-        return CoordinatorData(chargers=charger_map, account=account)
+        # time_zones is a top-level, not per-charger, list — tolerate older
+        # servers that omit it entirely (defaults to []).
+        time_zones: list[dict[str, Any]] = envelope.get("time_zones") or []
+
+        return CoordinatorData(chargers=charger_map, account=account, time_zones=time_zones)

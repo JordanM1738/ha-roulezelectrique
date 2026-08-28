@@ -23,6 +23,9 @@ from typing import Any
 import aiohttp
 
 from .const import (
+    API_AVE_PLUG_AND_CHARGE_PATH,
+    API_AVE_REBOOT_PATH,
+    API_AVE_TIMEZONE_PATH,
     API_COMMAND_POLL_PATH,
     API_LOCK_PATH,
     API_MAX_CURRENT_PATH,
@@ -295,6 +298,63 @@ class RoulezElectriqueApiClient:
         path = API_LOCK_PATH.format(charger_id=charger_id)
         return await self._request("POST", path, json={"locked": locked})
 
+    async def set_ave_plug_and_charge(
+        self,
+        charger_id: int,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        """POST /api/v1/chargers/{id}/ave/plug-and-charge → {id, status, synchronous}.
+
+        IYILO-only (server calls this vendor "ave" on the wire). FULLY
+        SYNCHRONOUS — same contract as remote_start/remote_stop/set_lock
+        above: {id: null, status: "accepted", synchronous: true} on success,
+        no command id to poll.
+
+        Raises OfflineError (409 offline). A vendor-side failure (502) or an
+        unrecognized value surface as the generic ConnectError/
+        RoulezElectriqueError respectively — not otherwise typed, same
+        convention as set_max_current()'s 422 case above. RateLimitedError
+        (429).
+        """
+        path = API_AVE_PLUG_AND_CHARGE_PATH.format(charger_id=charger_id)
+        return await self._request("POST", path, json={"enabled": enabled})
+
+    async def set_ave_time_zone(
+        self,
+        charger_id: int,
+        time_zone_value: str,
+    ) -> dict[str, Any]:
+        """POST /api/v1/chargers/{id}/ave/timezone → {id, status, synchronous}.
+
+        IYILO-only. FULLY SYNCHRONOUS, same contract as
+        set_ave_plug_and_charge() above.
+
+        Raises OfflineError (409 offline). An unknown `time_zone_value`
+        surfaces as the generic RoulezElectriqueError (422
+        {"error": "invalid_timezone"}); a vendor-side failure as ConnectError
+        (502 {"error": "vendor_error"}) — neither is a dedicated exception
+        type, same convention as set_max_current()'s 422 case above.
+        RateLimitedError (429).
+        """
+        path = API_AVE_TIMEZONE_PATH.format(charger_id=charger_id)
+        return await self._request(
+            "POST", path, json={"time_zone_value": time_zone_value}
+        )
+
+    async def reboot_ave_charger(self, charger_id: int) -> dict[str, Any]:
+        """POST /api/v1/chargers/{id}/ave/reboot → {id, status, synchronous}.
+
+        IYILO-only, no request body. FULLY SYNCHRONOUS, same contract as
+        set_ave_plug_and_charge() above — physically power-cycles the borne,
+        interrupting any charge in progress.
+
+        Raises OfflineError (409 offline), RateLimitedError (429). A
+        vendor-side failure (502) surfaces as the generic ConnectError, same
+        convention as the other two methods above.
+        """
+        path = API_AVE_REBOOT_PATH.format(charger_id=charger_id)
+        return await self._request("POST", path)
+
     async def get_command(self, command_id: int | str) -> dict[str, Any]:
         """GET /api/v1/commands/{id} → {id, status, result, error}.
 
@@ -310,9 +370,9 @@ class RoulezElectriqueApiClient:
         Returns the final command dict.
         Raises ConnectError on timeout (we exceeded COMMAND_TIMEOUT seconds).
         """
-        deadline = asyncio.get_event_loop().time() + COMMAND_TIMEOUT
+        deadline = asyncio.get_running_loop().time() + COMMAND_TIMEOUT
         while True:
-            remaining = deadline - asyncio.get_event_loop().time()
+            remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise ConnectError(
                     f"Command {command_id} did not reach a terminal state within {COMMAND_TIMEOUT}s"

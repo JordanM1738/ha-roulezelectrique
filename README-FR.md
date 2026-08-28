@@ -12,14 +12,16 @@ Un appareil HA **par borne**, plus un appareil **Compte** pour les statistiques 
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **OCPP** (toute borne OCPP 1.6J connectée à la plateforme) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Wallbox** (compte lié) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **AVE** (compte lié) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **IYILO** (anciennement AVE ; compte lié) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Tesla** Wall Connector (compte lié) | ✅ | ✅ | ✅ | ✅ | — | — | — |
 | **Sigenergy AC** (compte lié) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Sigenergy DC** (compte lié) | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 
-La disponibilité du contrôle est décidée **côté serveur** (les indicateurs `controllable` / `current_limit_controllable` de la plateforme) : une borne OCPP doit être en ligne (WebSocket actif), et les vendeurs infonuagiques (Wallbox, AVE, Sigenergy AC et DC) nécessitent un compte lié actif. Quand le contrôle est temporairement indisponible, l'entité existe mais s'affiche comme *indisponible* — elle n'échoue jamais silencieusement.
+La disponibilité du contrôle est décidée **côté serveur** (les indicateurs `controllable` / `current_limit_controllable` de la plateforme) : une borne OCPP doit être en ligne (WebSocket actif), et les vendeurs infonuagiques (Wallbox, IYILO, Sigenergy AC et DC) nécessitent un compte lié actif. Quand le contrôle est temporairement indisponible, l'entité existe mais s'affiche comme *indisponible* — elle n'échoue jamais silencieusement.
 
-**Nouveau (v0.5.0) :** Sigenergy AC et DC obtiennent maintenant l'interrupteur de démarrer/arrêter (via le même appel synchrone que Wallbox/AVE — la plateforme distingue AC/DC en coulisses). Seule Sigenergy AC garde le curseur de courant maximal ; il n'existe pas d'API de limite de courant pour le DC.
+**Nouveau (v0.9.0) :** trois réglages propres aux bornes IYILO — Plug & Charge, fuseau horaire et redémarrage — voir *Entités* ci-dessous.
+
+**Nouveau (v0.5.0) :** Sigenergy AC et DC obtiennent maintenant l'interrupteur de démarrer/arrêter (via le même appel synchrone que Wallbox/IYILO — la plateforme distingue AC/DC en coulisses). Seule Sigenergy AC garde le curseur de courant maximal ; il n'existe pas d'API de limite de courant pour le DC.
 
 Les capteurs supplémentaires par vendeur (ci-dessous) sont créés **uniquement pour les bornes capables de les rapporter** — un Tesla Wall Connector n'obtient jamais de capteur de température, un Wallbox jamais de capteur NIV, etc. C'est décidé par la plateforme, borne par borne (via la liste `capabilities` renvoyée par le serveur pour chaque borne), ce qui reste juste automatiquement à mesure que la plateforme ajoute des vendeurs ou de nouvelles capacités — y compris le capteur binaire **Branché**, lui aussi entièrement piloté par cette liste depuis la v0.5.0 (voir ci-dessous).
 
@@ -27,7 +29,7 @@ Les capteurs supplémentaires par vendeur (ci-dessous) sont créés **uniquement
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **OCPP** | ✅ | — | rare¹ | rare¹ | ✅ | ✅ | — | — | — |
 | **Wallbox** | ✅ | — | — | — | ✅ | — | ✅ | — | — |
-| **AVE** | ✅ | — | — | — | — | ✅ | — | — | — |
+| **IYILO** | ✅ | — | — | — | — | ✅ | — | — | — |
 | **Tesla** | ✅ | — | — | — | — | — | — | — | ✅ |
 | **Sigenergy AC** | ✅ | ✅ | ✅ | — | — | ✅ | — | ✅ | — |
 | **Sigenergy DC** | ✅ | — | — | — | — | — | — | — | — |
@@ -53,7 +55,7 @@ Les capteurs supplémentaires par vendeur (ci-dessous) sont créés **uniquement
 - **Niveau de batterie** (%) — OCPP seulement, quand la borne le rapporte (rare)
 - **Courant mesuré** (A) — Sigenergy AC seulement ; le tirage *réel*, distinct du capteur « Courant » ci-dessus, qui reste la limite configurée
 - **Dernière connexion** (horodatage) — OCPP, Wallbox
-- **Début de session** (horodatage) — OCPP, AVE, Sigenergy AC (non disponible depuis l'infonuagique Wallbox)
+- **Début de session** (horodatage) — OCPP, IYILO, Sigenergy AC (non disponible depuis l'infonuagique Wallbox)
 - **Vitesse de charge** (km/h) et **Autonomie ajoutée** (km) — Wallbox seulement
 - **Type de connexion** (ethernet/wifi/cellulaire) — Sigenergy AC seulement
 - **NIV** — Tesla seulement, le NIV du véhicule connecté
@@ -71,13 +73,18 @@ Les capteurs de télémétrie (puissance, énergie, courant, tension, températu
 **Capteurs binaires**
 - **En ligne** (connectivité) — tous les vendeurs
 - **En charge** — tous les vendeurs
-- **Branché** — piloté par la plateforme (liste `capabilities`) plutôt que par une liste de vendeurs codée en dur ; couvre actuellement OCPP, Wallbox, AVE, Tesla et Sigenergy AC/DC
+- **Branché** — piloté par la plateforme (liste `capabilities`) plutôt que par une liste de vendeurs codée en dur ; couvre actuellement OCPP, Wallbox, IYILO, Tesla et Sigenergy AC/DC
 
 **Contrôles**
-- **Interrupteur de charge** (démarrer/arrêter) — OCPP, Wallbox, AVE, Sigenergy AC et DC. Les commandes sont confirmées de bout en bout : les commandes OCPP sont interrogées jusqu'à ce que la borne les accepte/rejette ; les autres vendeurs répondent de façon synchrone (le résultat est déjà connu à la réponse) ; les échecs apparaissent en notification d'erreur HA et l'interrupteur revient en arrière (pas de faux état).
-- **Courant maximal** (curseur numérique, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, AVE, Sigenergy AC. **Les bornes EVduty/Elmec ont un curseur distinct** (« Courant max (EVduty) ») : leur micrologiciel est OCPP « Core »-only et rejette `SetChargingProfile`, le serveur applique donc la valeur en écrivant le réglage `MaxCurrent` de la borne. Deux conséquences propres à ce chemin — appliquer une valeur **redémarre la borne pendant 30 à 60 s** (c'est ce redémarrage qui l'applique), et la commande est **refusée pendant une recharge en cours**. Son plafond est la valeur d'installation relevée sur la borne, jamais au-dessus. Une borne affiche l'un OU l'autre curseur, jamais les deux. Les limites viennent du serveur (typiquement 6 A jusqu'au maximum de la borne). Depuis la v0.6.0, quand une borne OCPP rapporte elle-même sa limite de courant matérielle dans sa configuration, ce maximum est utilisé comme plafond — par exemple, les bornes Wallbox Pulsar Plus en OCPP qui rapportent 48 A obtiennent un plafond de 48 A au lieu du maximum générique de 32 A. Non disponible pour Sigenergy DC (aucune API de limite de courant côté DC).
+- **Interrupteur de charge** (démarrer/arrêter) — OCPP, Wallbox, IYILO, Sigenergy AC et DC. Les commandes sont confirmées de bout en bout : les commandes OCPP sont interrogées jusqu'à ce que la borne les accepte/rejette ; les autres vendeurs répondent de façon synchrone (le résultat est déjà connu à la réponse) ; les échecs apparaissent en notification d'erreur HA et l'interrupteur revient en arrière (pas de faux état).
+- **Courant maximal** (curseur numérique, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, IYILO, Sigenergy AC. **Les bornes EVduty/Elmec ont un curseur distinct** (« Courant max (EVduty) ») : leur micrologiciel est OCPP « Core »-only et rejette `SetChargingProfile`, le serveur applique donc la valeur en écrivant le réglage `MaxCurrent` de la borne. Deux conséquences propres à ce chemin — appliquer une valeur **redémarre la borne pendant 30 à 60 s** (c'est ce redémarrage qui l'applique), et la commande est **refusée pendant une recharge en cours**. Son plafond est la valeur d'installation relevée sur la borne, jamais au-dessus. Une borne affiche l'un OU l'autre curseur, jamais les deux. Les limites viennent du serveur (typiquement 6 A jusqu'au maximum de la borne). Depuis la v0.6.0, quand une borne OCPP rapporte elle-même sa limite de courant matérielle dans sa configuration, ce maximum est utilisé comme plafond — par exemple, les bornes Wallbox Pulsar Plus en OCPP qui rapportent 48 A obtiennent un plafond de 48 A au lieu du maximum générique de 32 A. Non disponible pour Sigenergy DC (aucune API de limite de courant côté DC).
 - **Interrupteur de verrou** — Wallbox seulement (activé = verrouillé).
+- **Interrupteur Plug & Charge** — **nouveau en v0.9.0, IYILO seulement.** Active/désactive le réglage Plug & Charge de la borne. Classé dans la section Configuration de l'appareil (un réglage, pas un contrôle de charge principal).
+- **Fuseau horaire** (liste déroulante) — **nouveau en v0.9.0, IYILO seulement.** Affiche et modifie le fuseau horaire configuré sur la borne. La liste des choix vient de la plateforme ; si la borne est actuellement réglée sur un fuseau horaire que la plateforme n'offre pas comme choix, cette valeur reste affichée quand même (jamais remplacée silencieusement par autre chose) — elle est simplement impossible à sélectionner à nouveau dans la liste tant que la plateforme ne l'offre pas. Classé dans Configuration.
+- **Redémarrer** (bouton) — **nouveau en v0.9.0, IYILO seulement.** Redémarre physiquement la borne et **interrompt toute session de charge en cours** — c'est une action réelle et perturbatrice, pas une simple actualisation. Home Assistant ne demande aucune confirmation avant d'exécuter l'appui sur un bouton, et un bouton peut aussi être déclenché par un script, une automatisation ou un assistant vocal. Il est donc **désactivé par défaut** : allez le chercher dans la section Configuration de l'appareil et activez-le une fois, délibérément, avant qu'il ne puisse être pressé. Il n'est **pas** bloqué pendant une session en cours : une borne coincée dans une session fantôme est justement le cas où il faut la redémarrer.
 - **Actualiser** (bouton) — **nouveau.** Toutes les bornes. Appuyez dessus pour forcer une vérification immédiate des données du serveur — la seule entité de cette intégration qui ne dépend jamais de `controllable`/du vendeur et qui est toujours disponible. Utile pour un changement fait en dehors de Home Assistant (ex. depuis l'application mobile Roulez Électrique), qui n'apparaît autrement dans HA qu'au prochain sondage prévu (voir **Intervalle de mise à jour** ci-dessous). L'action native de Home Assistant Core « Actualiser l'entité » (`homeassistant.update_entity`, accessible depuis la fenêtre de détail de l'entité ou dans les automatisations/scripts) fait exactement la même chose et fonctionne aussi — ce bouton est simplement un raccourci en un clic depuis l'application compagnon.
+
+Les trois réglages IYILO ci-dessus (Plug & Charge, fuseau horaire, redémarrage) deviennent tous *indisponibles ensemble* dès que les réglages de cette borne ne sont pas contrôlables en ce moment (compte IYILO inactif ou borne retirée) — une condition distincte de la disponibilité de l'interrupteur de charge lui-même, puisqu'une borne peut rester joignable pour le contrôle de charge alors que ses réglages ne le sont pas.
 
 ### Appareil Compte
 
@@ -96,7 +103,7 @@ Utilisez le capteur **Énergie totale** de chaque borne comme source lorsque vou
 
 ## Prérequis
 
-- Home Assistant **2024.1.0** ou plus récent
+- Home Assistant **2024.11.0** ou plus récent
 - Un compte Roulez Électrique sur [roulezelectrique.club](https://roulezelectrique.club)
 - Un jeton d'API depuis votre profil (voir Configuration)
 
@@ -162,10 +169,11 @@ L'intégration prend en charge le téléchargement des diagnostics intégré à 
 
 - **Depuis v0.2.4 ou antérieur :** les capteurs au niveau du compte (récompenses, invitations, énergie à vie, nombre de bornes) avaient un identifiant interne dupliqué qui est corrigé automatiquement au premier rechargement de l'intégration après la mise à jour — vos entités existantes, leur historique et tout tableau de bord/automatisation qui les référence sont préservés (aucun réajout, aucune nouvelle entité).
 - **Depuis v0.3.x :** les nouveaux capteurs par borne (Énergie totale, Sessions totales, Température, Niveau de batterie, Courant mesuré, Dernière connexion, Début de session, Vitesse de charge, Autonomie ajoutée, Type de connexion, NIV) apparaissent automatiquement au premier rechargement pour chaque borne dont le vendeur peut les rapporter — aucun réajout, aucun changement de configuration nécessaire. Les identifiants d'entités existants ne changent pas, mais la classe d'état du capteur **Énergie à vie** au niveau du compte passe de `total_increasing` à `total` (il peut maintenant être corrigé à la baisse, ex. après un nettoyage de données, sans que Home Assistant l'interprète à tort comme une remise à zéro du compteur). Home Assistant peut journaliser un avis ponctuel « les métadonnées statistiques ont changé » pour ce capteur : c'est normal et sans conséquence, ses statistiques à long terme et son historique continuent de fonctionner normalement.
-- **Depuis v0.4.x :** Sigenergy AC et DC obtiennent maintenant l'interrupteur démarrer/arrêter (contrôle à distance, compte lié actif requis), et le capteur binaire **Branché** couvre désormais aussi OCPP et Sigenergy AC/DC (auparavant limité à Wallbox/AVE/Tesla). Ces nouvelles entités apparaissent automatiquement au premier rechargement pour les bornes concernées — aucun réajout, aucun changement de configuration nécessaire.
+- **Depuis v0.4.x :** Sigenergy AC et DC obtiennent maintenant l'interrupteur démarrer/arrêter (contrôle à distance, compte lié actif requis), et le capteur binaire **Branché** couvre désormais aussi OCPP et Sigenergy AC/DC (auparavant limité à Wallbox/IYILO/Tesla). Ces nouvelles entités apparaissent automatiquement au premier rechargement pour les bornes concernées — aucun réajout, aucun changement de configuration nécessaire.
 - **Depuis v0.5.x :** six nouveaux capteurs de diagnostic OCPP (Signal Wi-Fi, Charge maximale, Charge minimale, Limite de courant de la borne, Intervalle de battement, Intervalle de mesure) apparaissent pour les bornes OCPP admissibles au premier rechargement suivant la lecture horaire de leur configuration — aucun réajout, aucun changement de configuration nécessaire (voir *Entités* ci-dessus pour le détail par borne et l'activation par défaut).
 
 ---
+- **Depuis v0.8.x :** les bornes IYILO obtiennent trois nouvelles entités — l'interrupteur **Plug & Charge**, la liste **Fuseau horaire** et le bouton **Redémarrer** (voir *Entités* ci-dessus), qui apparaissent automatiquement au premier rechargement après la mise à jour, sauf **Redémarrer**, livré désactivé et à activer à la main. Cette intégration obtient aussi son tout premier type d'entité **liste déroulante (select)** : si une automatisation ou un script filtre les entités par domaine (ex. seulement `switch.*`), sachez qu'une entité `select.*` existe désormais par borne IYILO. Aucun autre vendeur n'est concerné. Ces entités exigent aussi que la mise à jour côté plateforme soit en service ; d'ici là, elles n'apparaissent tout simplement pas.
 
 ## Limitations connues
 
@@ -175,6 +183,7 @@ L'intégration prend en charge le téléchargement des diagnostics intégré à 
 - **La force du signal WiFi via l'API infonuagique d'un vendeur n'est disponible pour aucune borne, chez aucun vendeur.** L'appareil de Tesla rapporte bien une valeur de force du signal, mais seulement via son API réseau locale sur le même LAN — l'API infonuagique que lit cette plateforme ne la transporte pas, il n'y a donc aucun moyen de l'exposer ici pour Tesla ou tout autre vendeur par cette voie. Le capteur diagnostic **Signal Wi-Fi** décrit ci-dessus est distinct : il vient de la configuration `GetConfiguration` que la borne OCPP rapporte elle-même (ex. Wallbox Pulsar Plus en OCPP), pas d'une API infonuagique en direct, et n'existe donc que pour les bornes OCPP qui la rapportent.
 - Les capteurs **Température** et **Niveau de batterie** sur les bornes OCPP n'affichent une valeur que pour le petit nombre de bornes dont le micrologiciel rapporte réellement ces lectures ; la plupart restent *inconnues* en permanence, ce qui est attendu (le capteur est tout de même créé afin qu'il commence à fonctionner dès qu'une borne se met à le rapporter).
 - L'intégration livre sa propre icône/logo de marque (dossier `brand/`, pris en charge depuis Home Assistant 2026.3.0). Sur les versions HA plus anciennes, l'intégration fonctionne bien mais s'affiche sans logo.
+- **Plug & Charge, fuseau horaire et redémarrage sont exclusifs à IYILO** — aucune borne d'un autre vendeur n'obtient ces entités, par conception (la plateforme n'expose pas ce type de réglage pour OCPP, Wallbox, Tesla ou Sigenergy). Le bouton Redémarrer n'a aucune étape de confirmation intégrée (Home Assistant n'en offre pas pour les boutons), raison pour laquelle il est livré désactivé jusqu'à ce que vous l'activiez vous-même. La plateforme n'expose par ailleurs délibérément **aucun** contrôle de mise à jour du micrologiciel, pour aucun vendeur — Redémarrer ne fait que relancer la borne avec son micrologiciel actuel.
 
 ---
 
