@@ -45,6 +45,7 @@ from .conftest import (
     OCPP_CHARGER_CHARGING,
     SIGENERGY_AC_CHARGER_FULL,
     SIGENERGY_DC_CHARGER,
+    TESLA_CHARGER_CONTROLLABLE,
     TESLA_CHARGER_LIVE,
     WALLBOX_CHARGER,
 )
@@ -474,15 +475,13 @@ async def test_ave_charge_switch_reflects_charging_and_is_available():
     assert switch.is_on is True
 
 
-@pytest.mark.asyncio
-async def test_no_switch_for_tesla():
-    """Tesla is never controllable — no switch entity."""
+async def _setup_switches(chargers: dict[int, dict[str, Any]]) -> list:
     from custom_components.roulezelectrique.switch import async_setup_entry
 
     from custom_components.roulezelectrique.coordinator import CoordinatorData
 
     coordinator = MagicMock()
-    coordinator.data = CoordinatorData(chargers={5: TESLA_CHARGER_LIVE}, account=None)
+    coordinator.data = CoordinatorData(chargers=chargers, account=None)
 
     hass = MagicMock()
     entry_id = "entry_id"
@@ -492,8 +491,50 @@ async def test_no_switch_for_tesla():
 
     added: list = []
     await async_setup_entry(hass, entry, lambda entities, **kw: added.extend(entities))
+    return added
 
-    assert added == []
+
+@pytest.mark.asyncio
+async def test_no_switch_for_tesla_the_server_does_not_report_controllable():
+    """A Tesla without remote-control consent (server `controllable` false) has
+    no switch — the gate is the server flag, not the vendor name."""
+    assert await _setup_switches({5: TESLA_CHARGER_LIVE}) == []
+
+
+@pytest.mark.asyncio
+async def test_tesla_controllable_gets_a_charge_switch_but_no_lock_switch():
+    """0.10.0+: a Tesla Wall Connector the server reports `controllable` (active
+    account + energy_cmds scope) gets the charge switch — flag-driven, no
+    Tesla-specific branch — and, as a non-Wallbox vendor, no lock switch."""
+    added = await _setup_switches({15: TESLA_CHARGER_CONTROLLABLE})
+
+    assert [type(e) for e in added] == [RoulezElectriqueSwitch]
+    assert added[0]._charger_id == 15
+
+
+@pytest.mark.asyncio
+async def test_tesla_charge_switch_turn_on_and_off_are_synchronous():
+    """Tesla start/stop answer {id: null, synchronous: true}: no command to
+    poll, no transaction id required, coordinator refreshed right away."""
+    switch, coordinator = _make_switch(
+        TESLA_CHARGER_CONTROLLABLE, start_return=SYNC_ACCEPTED, stop_return=SYNC_ACCEPTED
+    )
+    assert switch.available is True
+
+    await switch.async_turn_on()
+    switch._client.remote_start.assert_awaited_once_with(15)
+    await switch.async_turn_off()
+    switch._client.remote_stop.assert_awaited_once_with(15, 0)
+
+    switch._client.await_command.assert_not_awaited()
+    assert coordinator.async_request_refresh.await_count == 2
+
+
+def test_tesla_charge_switch_unavailable_when_server_stops_reporting_controllable():
+    """The server flips `controllable` off (account revoked/scope lost, retired
+    charger): the existing switch goes unavailable instead of failing on press."""
+    switch, _ = _make_switch({**TESLA_CHARGER_CONTROLLABLE, "controllable": False})
+    assert switch.available is False
 
 
 # ---------------------------------------------------------------------------
@@ -533,8 +574,8 @@ async def test_sigenergy_gets_charge_switch_but_no_lock_switch():
     added: list = []
     await async_setup_entry(hass, entry, lambda entities, **kw: added.extend(entities))
 
-    # OCPP → 1 charge switch; Sigenergy DC + AC → 1 charge switch each; Tesla
-    # → none. Total = 3.
+    # OCPP → 1 charge switch; Sigenergy DC + AC → 1 charge switch each; this
+    # Tesla fixture is not `controllable` → none. Total = 3.
     assert len(added) == 3
     lock_switches = [e for e in added if isinstance(e, RoulezElectriqueLockSwitch)]
     assert len(lock_switches) == 0

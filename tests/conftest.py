@@ -138,7 +138,7 @@ AVE_CHARGER: dict[str, Any] = {
 
 # A read-only Tesla Wall Connector with a warm cached live snapshot merged in
 # (plugged_in + charging derived from power_w > 100 W, see TeslaLiveState).
-# Never controllable — ChargerActionsController has no Tesla branch.
+# Not controllable here (no energy_cmds consent); see TESLA_CHARGER_CONTROLLABLE.
 TESLA_CHARGER_LIVE: dict[str, Any] = {
     "id": 5,
     "name": "Tesla Wall Connector",
@@ -163,6 +163,17 @@ TESLA_CHARGER_LIVE: dict[str, Any] = {
     "fresh": False,
     "stale": False,
     "last_session": None,
+}
+
+# A Tesla Wall Connector whose account allows remote control (0.10.0+): the
+# server reports `controllable` true (active account + energy_cmds scope),
+# so it gets a charge switch. `current_limit_controllable` stays False — Tesla
+# has no current-limit lever.
+TESLA_CHARGER_CONTROLLABLE: dict[str, Any] = {
+    **TESLA_CHARGER_LIVE,
+    "id": 15,
+    "serial_number": "TESLA-CTRL-001",
+    "controllable": True,
 }
 
 # A Sigenergy DC EVSE with an active linked account, with a warm cached live

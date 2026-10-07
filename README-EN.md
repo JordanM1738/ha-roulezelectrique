@@ -13,11 +13,13 @@ One HA **device per charger**, plus one **Account** device for program-level sta
 | **OCPP** (any OCPP 1.6J charger connected to the platform) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Wallbox** (linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **IYILO** (formerly AVE; linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **Tesla** Wall Connector (linked account) | ✅ | ✅ | ✅ | ✅ | — | — | — |
+| **Tesla** Wall Connector (linked account) | ✅ | ✅ | ✅ | ✅ | ✅² | — | — |
 | **Sigenergy AC** (linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Sigenergy DC** (linked account) | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 
-Control availability is decided **server-side** (the platform's `controllable` / `current_limit_controllable` flags): an OCPP charger must be online (live WebSocket), and cloud vendors (Wallbox, IYILO, Sigenergy AC and DC) need an active linked account. When control is temporarily unavailable, the entity exists but shows as *unavailable* — it never fails silently.
+Control availability is decided **server-side** (the platform's `controllable` / `current_limit_controllable` flags): an OCPP charger must be online (live WebSocket), and cloud vendors (Wallbox, IYILO, Sigenergy AC and DC, Tesla) need an active linked account (Tesla also needs the remote-control consent, see below). When control is temporarily unavailable, the entity exists but shows as *unavailable* — it never fails silently.
+
+**New in v0.10.0:** IYILO and Tesla live values are now refreshed by the platform about every 2 minutes while Home Assistant is in use (they used to stay empty unless you had the website or the app open), and Tesla Wall Connectors get the **start/stop switch**. ² Tesla start/stop turns the Wall Connector's own "charging allowed" schedule on/off — it **overrides any charge schedule you set in the Tesla app**, and needs an account linked with the remote-control consent (re-link Tesla if the switch is missing). BEQ and EVduty cloud-API chargers are not covered.
 
 **New in v0.9.0:** three IYILO-only borne settings — Plug & Charge, time zone and reboot — see *Entities* below.
 
@@ -76,7 +78,7 @@ Telemetry sensors (power, energy, current, voltage, temperature, battery level, 
 - **Plugged in** — driven by the platform's `capabilities` list rather than a hardcoded vendor list; currently covers OCPP, Wallbox, IYILO, Tesla and Sigenergy AC/DC
 
 **Controls**
-- **Charge switch** (start/stop) — OCPP, Wallbox, IYILO, Sigenergy AC and DC. Commands are confirmed end-to-end: OCPP commands are polled until the charger accepts/rejects; the other vendors respond synchronously (the result is already known in the response); failures surface as an HA error toast and the switch reverts (no fake state).
+- **Charge switch** (start/stop) — OCPP, Wallbox, IYILO, Sigenergy AC and DC, and (v0.10.0+) Tesla Wall Connectors whose account allows remote control — the switch is created for any charger the platform reports as controllable when the integration loads. Commands are confirmed end-to-end: OCPP commands are polled until the charger accepts/rejects; the other vendors respond synchronously (the result is already known in the response); failures surface as an HA error toast and the switch reverts (no fake state).
 - **Max current** (number slider, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, IYILO, Sigenergy AC. **EVduty/Elmec chargers get a separate slider** ("Max current (EVduty)"): their firmware is OCPP "Core"-only and rejects `SetChargingProfile` outright, so the server applies the value by writing the charger's `MaxCurrent` setting instead. Two consequences specific to that path — applying a value **reboots the charger for 30-60 s** (that reboot is what makes it take effect), and the command is **refused while a session is in progress**. Its ceiling is the installation baseline captured from the charger, never higher. A charger shows one slider or the other, never both. Bounds come from the server (typically 6 A up to the charger's max). Since v0.6.0, when an OCPP charger reports its own hardware current limit in its configuration, that value is used as the ceiling — for example, Wallbox Pulsar Plus chargers on OCPP that report 48 A now get a 48 A ceiling instead of the generic 32 A default. Not available for Sigenergy DC (no current-limit API on the DC side).
 - **Lock switch** — Wallbox only (on = locked).
 - **Plug & Charge switch** — **new in v0.9.0, IYILO only.** Turns the borne's Plug & Charge setting on/off. Filed under the device's Configuration section (a setting, not a primary charge control).
@@ -173,11 +175,12 @@ The integration supports HA's built-in diagnostics download (Settings → Device
 - **From v0.5.x:** six new OCPP diagnostic sensors (Wi-Fi signal, Maximum charge level, Minimum charge level, Charger current limit, Heartbeat interval, Meter sample interval) appear for eligible OCPP chargers on the first reload after their configuration is next read hourly — no re-adding, no configuration change needed (see *Entities* above for the per-charger detail and default enablement).
 
 ---
+- **From v0.9.x:** Tesla Wall Connectors get the start/stop switch (only if the Tesla account was linked with the remote-control consent — otherwise re-link Tesla), appearing on the first reload. IYILO and Tesla sensors now carry values even when the app/website is closed.
 - **From v0.8.x:** IYILO chargers get three new entities — the **Plug & Charge** switch, the **Time zone** select and the **Reboot** button (see *Entities* above), appearing automatically on the first reload after upgrading, except **Reboot**, which ships disabled and must be enabled by hand. This integration also gains its first **select** entity type, so any automation or script that filters entities by domain (e.g. `switch.*` only) should be aware a `select.*` entity now exists per IYILO charger. Every other vendor is unaffected. These entities also require the platform-side update to be live; until then they simply do not appear.
 
 ## Known limitations
 
-- Tesla chargers are **read-only** — the platform does not expose remote control for them.
+- **IYILO and Tesla values refresh about every 2 minutes**, not every 30 s, and only while Home Assistant is actively polling (the platform stops refreshing a few minutes after the last poll). IYILO allows a single login per account, so a refresh can occasionally sign you out of the IYILO app. Tesla start/stop **overrides the schedule configured in the Tesla app** (it uses the Wall Connector's own charge schedule); there is no current-limit slider for Tesla.
 - Sigenergy DC chargers get the start/stop switch but **not** the max-current slider — there is no current-limit API on the DC side.
 - The **Session energy** sensor measures the current charging session only and resets to 0 each session — it is **not** a lifetime cumulative meter, so it is **not recommended as a Home Assistant Energy dashboard source** (the Energy dashboard expects an ever-increasing total). Each charger's own **Lifetime energy** sensor (and the account's) is the cumulative one — see *Energy dashboard* above.
 - **WiFi signal strength via a vendor's cloud API is not available for any charger, from any vendor.** Tesla's own device does report a signal-strength value, but only over its local network API on the same LAN — the cloud API this platform reads from does not carry it, so there is no way to surface it here for Tesla or any other vendor through that path. The **Wi-Fi signal** diagnostic sensor described above is a different thing: it comes from the `GetConfiguration` data an OCPP charger reports about itself (e.g. Wallbox Pulsar Plus on OCPP), not a live cloud API, so it only exists for OCPP chargers that report it.
