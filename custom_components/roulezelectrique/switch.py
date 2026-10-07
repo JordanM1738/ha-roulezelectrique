@@ -2,8 +2,9 @@
 
 Three switch types:
   - Charge switch: created for every CONTROLLABLE-capable charger — OCPP,
-    Wallbox, AVE and Sigenergy (AC + DC) bornes. on = charging; toggling
-    calls remote-start/stop.
+    Wallbox, AVE and Sigenergy (AC + DC) bornes, plus ANY charger (today:
+    Tesla Wall Connectors, 0.10.0+) the server reports as `controllable` when
+    the entry is set up. on = charging; toggling calls remote-start/stop.
   - Lock switch: Wallbox ONLY — on = borne locked; toggling calls POST
     /chargers/{id}/lock {locked}. OCPP/AVE/Sigenergy have no lock concept (no
     lock switch).
@@ -19,20 +20,27 @@ Three switch types:
 
 The server's `controllable` predicate decides runtime availability (OCPP: live
 WebSocket; Wallbox/AVE: active account; Sigenergy AC/DC: active linked
-account). Other vendors (Tesla, …) are never controllable and get NO switch.
+account; Tesla: active account with the energy_cmds scope). Vendors the
+server does not report as controllable get NO switch.
+
+Tesla note (0.10.0+): start/stop toggles the Wall Connector's OWN "charging
+allowed" schedule (same lever as the platform's Peak Events), so it OVERRIDES
+any charge schedule set in the Tesla app. A Tesla whose account lacks the
+`energy_cmds` consent is not `controllable` and gets no switch until the member
+re-links Tesla and the entry reloads.
 
 Switch behavior:
   - is_on: poll-confirmed `charging` value from coordinator
   - available: requires server `controllable` (pre-emptive check; avoids 409)
-  - turn_on: POST remote-start → (OCPP) await_command, (Wallbox/AVE/Sigenergy)
-    synchronous
-  - turn_off: POST remote-stop → (OCPP) await_command, (Wallbox/AVE/Sigenergy)
-    synchronous
+  - turn_on: POST remote-start → (OCPP) await_command, (Wallbox/AVE/Sigenergy/
+    Tesla) synchronous
+  - turn_off: POST remote-stop → (OCPP) await_command, (Wallbox/AVE/Sigenergy/
+    Tesla) synchronous
 
 OCPP vs synchronous-vendor control flow:
   - OCPP returns {id, status} and the command runs async on the borne — we
     poll GET /commands/{id} via await_command until a terminal status.
-  - Wallbox, AVE and Sigenergy all return
+  - Wallbox, AVE, Sigenergy and Tesla all return
     {id: null, status: "accepted", synchronous: true} — the cloud call
     already completed (or fail-closed errored) through the SAME
     /remote-start and /remote-stop endpoints the client already calls (the
@@ -80,9 +88,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up switch entities from a config entry.
 
-    Controllable-capable chargers (OCPP, Wallbox, AVE or Sigenergy AC/DC) get
-    a charge switch. Wallbox bornes additionally get a lock switch. Other
-    vendors are skipped.
+    Controllable-capable chargers (OCPP, Wallbox, AVE or Sigenergy AC/DC) and
+    any charger the server reports `controllable` (Tesla) get a charge switch.
+    Wallbox bornes additionally get a lock switch. Other chargers are skipped.
     """
     coordinator: RoulezElectriqueCoordinator = hass.data[DOMAIN][entry.entry_id]
     client: RoulezElectriqueApiClient = hass.data[DOMAIN][f"{entry.entry_id}_client"]
@@ -94,8 +102,11 @@ async def async_setup_entry(
         # stable vendor (OCPP, Wallbox, AVE or Sigenergy) rather than the live
         # `controllable` flag so the entity exists even while temporarily
         # uncontrollable (offline OCPP / inactive account) — `available`
-        # reflects that at runtime. Other vendors (Tesla, …) never expose
-        # remote control and get NO switch. Sigenergy covers both the AC and
+        # reflects that at runtime. Any OTHER charger (Tesla, 0.10.0+) is
+        # driven by the server's own `controllable` flag at setup time rather
+        # than a hardcoded vendor, so a Tesla without remote-control consent
+        # gets no switch and a future controllable vendor needs no client
+        # change. Sigenergy covers both the AC and
         # DC vendor_label variants — both use the same `vendor == "sigenergy"`
         # string and the same synchronous remote-start/remote-stop calls (the
         # server branches AC vs DC internally).
@@ -113,7 +124,13 @@ async def async_setup_entry(
                 RoulezElectriquePlugAndChargeSwitch(coordinator, client, charger_id)
             )
 
-        if not (charger_data.get("is_ocpp") or is_wallbox or is_ave or is_sigenergy):
+        if not (
+            charger_data.get("is_ocpp")
+            or is_wallbox
+            or is_ave
+            or is_sigenergy
+            or charger_data.get("controllable")
+        ):
             _LOGGER.debug(
                 "Charger %s is not controllable-capable — no switch entity created",
                 charger_id,
