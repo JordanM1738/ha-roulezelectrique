@@ -113,6 +113,23 @@ def test_available_gated_on_max_current_controllable():
 
 
 @pytest.mark.asyncio
+async def test_client_sends_allow_while_charging_opt_in():
+    """Changing amps mid-charge must work: the server refuses unless the body opts in."""
+    from custom_components.roulezelectrique.api import RoulezElectriqueApiClient
+
+    client = RoulezElectriqueApiClient.__new__(RoulezElectriqueApiClient)
+    client._request = AsyncMock(return_value=MAX_CURRENT_APPLIED)
+
+    await client.set_max_current(9, 24)
+
+    client._request.assert_awaited_once()
+    args, kwargs = client._request.await_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/chargers/9/max-current")
+    assert kwargs["json"] == {"amps": 24, "allow_while_charging": True}
+
+
+@pytest.mark.asyncio
 async def test_set_calls_max_current_endpoint_not_power_limit():
     """The whole point: this borne must never receive a SetChargingProfile."""
     number, coordinator, client = _make_number(EVDUTY_CHARGER)

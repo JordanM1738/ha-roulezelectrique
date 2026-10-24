@@ -11,6 +11,8 @@ Connect your [Roulez Électrique](https://roulezelectrique.club) EV chargers to 
 
 ---
 
+**Nouveau / New (v0.10.1) :** Le curseur « Courant max (EVduty) » fonctionne maintenant aussi pendant une recharge, et ne redémarre plus la borne. / The "Max current (EVduty)" slider now also works during a charge, and no longer reboots the charger. Détails / Details: README-FR.md, README-EN.md.
+
 **Nouveau / New (v0.10.0) :** Valeurs en direct IYILO et Tesla rafraîchies par la plateforme (~2 min) ; interrupteur démarrer/arrêter pour les Tesla Wall Connector (remplace l'horaire de l'application Tesla). / IYILO and Tesla live values refreshed by the platform (~2 min); start/stop switch for Tesla Wall Connectors (overrides the Tesla app's schedule). Détails / Details: README-FR.md, README-EN.md.
 
 **Nouveau / New (v0.7.0) :** Le curseur de courant maximal fonctionne enfin sur les bornes EVduty/Elmec, qui rejetaient jusqu'ici la commande OCPP utilisée. Attention : appliquer une valeur redémarre la borne 30-60 s, et la commande est refusée pendant une recharge. Voir la doc complète ci-dessus.
