@@ -9,8 +9,8 @@ Exceptions hierarchy:
     ├── RateLimitedError           429 — carry Retry-After seconds
     ├── OfflineError               409 — charger offline at command time
     ├── ChargingInProgressError    409 {"error": "charging_in_progress"} —
-    │                              set_max_current only; the server refuses to
-    │                              run a reboot-ending recipe mid-session
+    │                              set_max_current only; a mid-session refusal
+    │                              (not expected now that we opt in, see there)
     └── ForbiddenError             403 — non-OCPP charger or onboarding gate
 """
 
@@ -72,11 +72,12 @@ class OfflineError(RoulezElectriqueError):
 class ChargingInProgressError(RoulezElectriqueError):
     """HTTP 409 {"error": "charging_in_progress"} — set_max_current only.
 
-    The MaxCurrent recipe ends with a Reset(Soft) that interrupts whatever
-    charge is running, so the server refuses it while a session is active (or
-    while that state cannot be determined). Distinct from OfflineError because
-    the remedy is the opposite: wait for the session to END, rather than for
-    the borne to come back online.
+    The server only returns this to a caller that did NOT send
+    `allow_while_charging: true`. set_max_current() always sends it (like the
+    mobile app), so this is not expected in practice; it is kept as a
+    defensive path in case the server tightens its guard again. Distinct from
+    OfflineError because the remedy is the opposite: wait for the session to
+    END, rather than for the borne to come back online.
     """
 
 
@@ -249,36 +250,33 @@ class RoulezElectriqueApiClient:
         """POST /api/v1/chargers/{id}/max-current → the recipe outcome dict.
 
         The EVduty/Elmec `MaxCurrent` amperage control — the ONLY power-limit
-        path for "Core"-only OCPP bornes, which reject SetChargingProfile with
-        NotSupported (so /power-limit can never work for them).
+        path for "Core"-only OCPP bornes (EVduty/Elmec), which this server
+        drives with a single SetChargingProfile; no reboot is involved.
 
         Unlike every other command endpoint this one is SYNCHRONOUS and returns
-        NO command id to poll: the server runs the whole
-        ChangeConfiguration -> read-back -> Reset(Soft) recipe inside the
-        request and returns its outcome:
+        NO command id to poll: the server runs the dispatch inside the request
+        and returns its outcome:
 
             {
-                "step": "applied" | "change_timeout" | "change_rejected"
-                      | "readback_offline" | "readback_timeout"
-                      | "readback_mismatch" | "reset_offline" | "reset_failed",
+                "step": "applied" | "refused",
                 "ok": bool,
                 "confirmed_amps": int | None,
-                "change_command_id": int,
-                "readback_command_id": int | None,
-                "reset_command_id": int | None,
+                "profile_command_id": int | None,
                 "cp_status": str | None,
             }
 
-        `ok` is the only success signal — a partial outcome (e.g. the value was
-        written and confirmed but the Reset failed) returns ok=False WITH a
-        non-null confirmed_amps, and callers must report that honestly rather
-        than as a plain failure: the borne may already hold the new value.
+        `ok` is the only success signal. Any other `step` value is handled
+        generically by the caller; `confirmed_amps` non-null with ok=False
+        would mean the value may already be held by the borne.
 
-        The final Reset(Soft) reboots the borne for 30-60s, so the server
-        refuses (409 charging_in_progress → ChargingInProgressError) while a
-        session is running. Rate limited to 10/min server-side.
+        The body always carries `allow_while_charging: true`, exactly like the
+        mobile app: the server's mid-session guard (409 charging_in_progress)
+        only protects UNATTENDED callers, and changing the amperage during a
+        charge is a supported action here. With that flag the server also
+        skips its "session state undetermined" refusal. Rate limited to
+        10/min server-side.
 
-        Raises ChargingInProgressError (409), OfflineError (409),
+        Raises ChargingInProgressError (409, defensive), OfflineError (409),
         RateLimitedError (429), ForbiddenError (403), and
         RoulezElectriqueError for a 422 (not an EVduty/Elmec borne, no baseline
         known, or amps outside the borne's permitted range).
@@ -287,7 +285,7 @@ class RoulezElectriqueApiClient:
         return await self._request(
             "POST",
             path,
-            json={"amps": amps},
+            json={"amps": amps, "allow_while_charging": True},
             timeout=aiohttp.ClientTimeout(total=MAX_CURRENT_REQUEST_TIMEOUT),
         )
 

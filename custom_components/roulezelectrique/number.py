@@ -260,12 +260,12 @@ class RoulezElectriqueEvdutyMaxCurrentNumber(RoulezElectriqueEntity, RestoreNumb
       - hits POST /chargers/{id}/max-current, not /power-limit (the borne
         rejects SetChargingProfile with NotSupported — the whole reason this
         class exists);
-      - is SYNCHRONOUS: the server runs ChangeConfiguration -> read-back ->
-        Reset(Soft) inside the one request and returns an outcome dict, so
-        there is NO command id to poll;
-      - REBOOTS the borne for 30-60s on every successful set (that Reset is
-        what actually applies the value), which is why the server refuses it
-        mid-session and rate limits it to 10/min;
+      - is SYNCHRONOUS: the server runs the whole change inside the one
+        request and returns an outcome dict, so there is NO command id to
+        poll;
+      - does NOT reboot the borne and works during a charge (the client sends
+        `allow_while_charging`, like the mobile app); the server rate limits
+        it to 10/min;
       - has no server-reported current value to read back — the payload only
         carries the bounds — so the applied value is restored across restarts
         via RestoreNumber rather than re-derived from coordinator data.
@@ -341,11 +341,11 @@ class RoulezElectriqueEvdutyMaxCurrentNumber(RoulezElectriqueEntity, RestoreNumb
         return self.native_max_value
 
     async def async_set_native_value(self, value: float) -> None:
-        """Apply a new MaxCurrent, rebooting the borne to make it stick.
+        """Apply a new MaxCurrent (works mid-charge; no borne reboot).
 
         Fail-closed: anything short of `ok` leaves the displayed value alone
-        and raises. A PARTIAL outcome (value confirmed on the borne but the
-        Reset never landed) is reported as its own message rather than a
+        and raises. A PARTIAL outcome (confirmed amps but not ok — not
+        expected from the current server) is reported as its own message rather than a
         generic failure — the borne may already hold the new setting, and the
         owner needs to know that to decide whether to retry.
         """
@@ -370,8 +370,8 @@ class RoulezElectriqueEvdutyMaxCurrentNumber(RoulezElectriqueEntity, RestoreNumb
             except ChargingInProgressError as err:
                 revert()
                 raise HomeAssistantError(
-                    "A charging session is in progress — setting the maximum current "
-                    "reboots the charger, so it is refused until the session ends"
+                    "The platform refused to change the maximum current while a "
+                    "charging session is in progress — try again once the session ends"
                 ) from err
             except OfflineError as err:
                 revert()
@@ -393,15 +393,15 @@ class RoulezElectriqueEvdutyMaxCurrentNumber(RoulezElectriqueEntity, RestoreNumb
                 step = result.get("step") or "unknown"
                 confirmed = result.get("confirmed_amps")
                 if confirmed is not None:
-                    # Written AND confirmed on the borne, but the reboot that
-                    # applies it did not complete — keep showing the confirmed
+                    # Reported as confirmed but not ok (not expected from the
+                    # current server) — keep showing the confirmed
                     # value, since that IS what the borne now holds.
                     self._applied_value = float(confirmed)
                     self.async_write_ha_state()
                     raise HomeAssistantError(
                         f"Maximum current {confirmed} A was written and confirmed, but the "
-                        f"charger reboot that applies it did not complete ({step}). "
-                        "The setting may take effect at the next restart."
+                        f"platform did not report a complete success ({step}). "
+                        "Check the charger before retrying."
                     )
                 revert()
                 raise HomeAssistantError(f"Could not set the maximum current ({step})")
