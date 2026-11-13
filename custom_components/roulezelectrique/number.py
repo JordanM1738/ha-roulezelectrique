@@ -1,4 +1,4 @@
-"""Number platform for the Roulez Électrique integration.
+"""Number platform for the Club Roulez Électrique integration.
 
 Exposes the max charging current (amps) as a slider for bornes that support
 current-limit control:
@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable, Hashable
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
@@ -60,8 +61,8 @@ from .api import (
     RoulezElectriqueApiClient,
 )
 from .const import DEFAULT_MAX_AMPS, DEFAULT_MIN_AMPS, DOMAIN
-from .coordinator import RoulezElectriqueCoordinator
-from .entity import RoulezElectriqueEntity
+from .coordinator import CoordinatorData, RoulezElectriqueCoordinator
+from .entity import RoulezElectriqueEntity, async_add_entities_dynamically
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,43 +78,81 @@ async def async_setup_entry(
     see the module docstring), falling back to the legacy is_ocpp/Wallbox
     check for older servers that don't send the field yet. Runtime
     availability reflects the same flag via the `available` property.
+    Re-evaluated on every poll (0.11.1+): a charger that becomes controllable
+    later gets its slider with no reload.
     """
     coordinator: RoulezElectriqueCoordinator = hass.data[DOMAIN][entry.entry_id]
     client: RoulezElectriqueApiClient = hass.data[DOMAIN][f"{entry.entry_id}_client"]
 
-    entities: list[NumberEntity] = []
-    charger_map = coordinator.data.chargers if coordinator.data else {}
-    for charger_id, charger_data in charger_map.items():
-        # Gate on the stable `current_limit_controllable` flag from the server:
-        # true for OCPP (online), Wallbox (active account), and Sigenergy AC
-        # (active account). Older servers without this field fall back to the
-        # legacy is_ocpp/vendor check so the entity still appears on upgrade.
-        is_limit_controllable = charger_data.get("current_limit_controllable")
-        if is_limit_controllable is None:
-            # Older server: fall back to legacy gate (OCPP or Wallbox).
-            is_limit_controllable = (
-                charger_data.get("is_ocpp") or charger_data.get("vendor") == "wallbox"
+    # Chargers already on the EVduty path (see _build). Remembered so a charger
+    # that got the EVduty slider can never also get the generic one later.
+    evduty_path: set[int] = set()
+
+    def _build(data: CoordinatorData) -> list[tuple[Hashable, Callable[[], Any]]]:
+        found: list[tuple[Hashable, Callable[[], Any]]] = []
+        for charger_id, charger_data in data.chargers.items():
+            # Gate on the stable `current_limit_controllable` flag from the server:
+            # true for OCPP (online), Wallbox (active account), and Sigenergy AC
+            # (active account). Older servers without this field fall back to the
+            # legacy is_ocpp/vendor check so the entity still appears on upgrade.
+            #
+            # EVduty/Elmec exception (0.11.1): before the server has read such a
+            # borne's first configuration it reports current_limit_controllable
+            # = true (optimistic window), then flips to
+            # max_current_controllable = true. With dynamic addition the generic
+            # slider created in that window would stay forever as an unavailable
+            # duplicate. The server advertises the "max_current" capability up
+            # front (before the baseline read, in the very first poll) for
+            # exactly these chargers, so that capability — or having already
+            # created the EVduty slider — marks the EVduty path and the generic
+            # slider is never created for it. Trade-off: no slider at all until
+            # the server reports max_current_controllable for such a borne.
+            if "max_current" in (charger_data.get("capabilities") or []):
+                evduty_path.add(charger_id)
+            is_limit_controllable = charger_data.get("current_limit_controllable")
+            if is_limit_controllable is None:
+                # Older server: fall back to legacy gate (OCPP or Wallbox).
+                is_limit_controllable = (
+                    charger_data.get("is_ocpp") or charger_data.get("vendor") == "wallbox"
+                )
+            if is_limit_controllable and charger_id not in evduty_path:
+                found.append(
+                    (
+                        (charger_id, "max_current"),
+                        lambda cid=charger_id: RoulezElectriqueMaxCurrentNumber(
+                            coordinator, client, cid
+                        ),
+                    )
+                )
+                continue
+
+            # "Core"-only OCPP borne (EVduty/Elmec): SetChargingProfile is refused
+            # by the firmware, so the server exposes the MaxCurrent path instead.
+            # Mutually exclusive with the flag above — checked second so a server
+            # bug that set both could never produce two competing sliders.
+            # The realistic direction is the reverse of the generic-first order
+            # above: the optimistic window (generic flag true), then EVduty —
+            # handled by the evduty_path rule, which keeps the generic slider
+            # from ever being created for these chargers.
+            if charger_data.get("max_current_controllable"):
+                evduty_path.add(charger_id)
+                found.append(
+                    (
+                        (charger_id, "evduty_max_current"),
+                        lambda cid=charger_id: RoulezElectriqueEvdutyMaxCurrentNumber(
+                            coordinator, client, cid
+                        ),
+                    )
+                )
+                continue
+
+            _LOGGER.debug(
+                "Charger %s does not support current-limit control — no max-current number entity",
+                charger_id,
             )
-        if is_limit_controllable:
-            entities.append(RoulezElectriqueMaxCurrentNumber(coordinator, client, charger_id))
-            continue
+        return found
 
-        # "Core"-only OCPP borne (EVduty/Elmec): SetChargingProfile is refused
-        # by the firmware, so the server exposes the MaxCurrent path instead.
-        # Mutually exclusive with the flag above — checked second so a server
-        # bug that set both could never produce two competing sliders.
-        if charger_data.get("max_current_controllable"):
-            entities.append(
-                RoulezElectriqueEvdutyMaxCurrentNumber(coordinator, client, charger_id)
-            )
-            continue
-
-        _LOGGER.debug(
-            "Charger %s does not support current-limit control — no max-current number entity",
-            charger_id,
-        )
-
-    async_add_entities(entities)
+    async_add_entities_dynamically(entry, coordinator, async_add_entities, _build)
 
 
 class RoulezElectriqueMaxCurrentNumber(RoulezElectriqueEntity, NumberEntity):

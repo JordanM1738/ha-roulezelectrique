@@ -1,6 +1,6 @@
-# Roulez Électrique — Intégration Home Assistant
+# Club Roulez Électrique — Intégration Home Assistant
 
-Connectez vos bornes de recharge [Roulez Électrique](https://roulezelectrique.club) à Home Assistant : télémétrie en direct pour chaque borne de votre compte, plus le contrôle à distance (démarrer/arrêter, limite de courant de charge, verrou) pour les vendeurs qui le permettent.
+Connectez vos bornes de recharge [Club Roulez Électrique](https://roulezelectrique.club) à Home Assistant : télémétrie en direct pour chaque borne de votre compte, plus le contrôle à distance (démarrer/arrêter, limite de courant de charge, verrou) pour les vendeurs qui le permettent.
 
 ---
 
@@ -18,6 +18,10 @@ Un appareil HA **par borne**, plus un appareil **Compte** pour les statistiques 
 | **Sigenergy DC** (compte lié) | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
 
 La disponibilité du contrôle est décidée **côté serveur** (les indicateurs `controllable` / `current_limit_controllable` de la plateforme) : une borne OCPP doit être en ligne (WebSocket actif), et les vendeurs infonuagiques (Wallbox, IYILO, Sigenergy AC et DC, Tesla) nécessitent un compte lié actif (Tesla exige aussi le consentement au contrôle à distance, voir plus bas). Quand le contrôle est temporairement indisponible, l'entité existe mais s'affiche comme *indisponible* — elle n'échoue jamais silencieusement.
+
+**Nouveau (v0.11.1) :** les nouveaux contrôles (démarrer/arrêter, courant maximal) apparaissent automatiquement dès qu'une borne devient contrôlable, sans recharger l'intégration. Il en va de même pour une borne ajoutée à votre compte plus tard, et pour une borne dont le contrôle n'est offert qu'une fois en ligne (par exemple une borne hors ligne au démarrage de Home Assistant) : son interrupteur et son curseur apparaissent dès qu'elle est contrôlable. Une borne retirée de votre compte conserve ses entités, affichées comme indisponibles, jusqu'à ce que vous les supprimiez ou rechargiez l'intégration.
+
+**Nouveau (v0.11.0) :** l'intégration s'appelle maintenant **Club Roulez Électrique** et utilise le logo officiel du Club ainsi que sa feuille comme icône. Changement de nom et d'images seulement : aucune modification fonctionnelle.
 
 **Nouveau (v0.10.1) :** le curseur « Courant max (EVduty) » fonctionne maintenant pendant une recharge en cours (il était refusé jusque-là) ; la borne n'est plus redémarrée. Pour dépasser la valeur d'installation, la confirmation reste requise dans l'application ou le tableau de bord.
 
@@ -72,7 +76,7 @@ Les capteurs supplémentaires par vendeur (ci-dessous) sont créés **uniquement
 
 Les capteurs de télémétrie (puissance, énergie, courant, tension, température, niveau de batterie, courant mesuré, vitesse de charge, autonomie ajoutée) passent *indisponibles* quand la borne est hors ligne ou que ses données sont périmées. Statut, dernière session, énergie/sessions à vie, dernière connexion, début de session, type de connexion, NIV et les six diagnostics de configuration OCPP ci-dessus restent lisibles même quand la borne est hors ligne.
 
-**Diagnostics de configuration OCPP (nouveau en v0.6.0)** — les six capteurs ci-dessus (Signal Wi-Fi, Charge maximale, Charge minimale, Limite de courant de la borne, Intervalle de battement, Intervalle de mesure) sont lus par le serveur directement dans la configuration `GetConfiguration` que la borne rapporte d'elle-même, environ une fois par heure — ce ne sont **pas** des mesures en direct, une valeur peut donc avoir jusqu'à une heure de retard sur la réalité (c'est aussi pourquoi ils restent lisibles hors ligne, contrairement aux capteurs de télémétrie ci-dessus). Ils sont créés **par borne**, pas par vendeur : uniquement pour la borne OCPP précise qui a effectivement rapporté cette clé avec une valeur plausible. La plupart des bornes de la flotte (EVduty/Elmec) ne rapportent que l'intervalle de battement et l'intervalle de mesure ; les bornes Wallbox Pulsar Plus qui parlent OCPP rapportent en plus le signal Wi-Fi, la charge min/max et la limite de courant. Seul **Signal Wi-Fi** est activé par défaut ; les cinq autres sont désactivés à l'installation — activez-les dans les paramètres de l'entité si vous le souhaitez. Une borne liée depuis moins d'une heure n'a pas encore eu sa configuration lue par le serveur : ces entités n'existent donc pas encore pour elle. Rechargez l'intégration une fois après la première lecture horaire pour les voir apparaître (contrairement aux capteurs pilotés par vendeur, qui apparaissent immédiatement).
+**Diagnostics de configuration OCPP (nouveau en v0.6.0)** — les six capteurs ci-dessus (Signal Wi-Fi, Charge maximale, Charge minimale, Limite de courant de la borne, Intervalle de battement, Intervalle de mesure) sont lus par le serveur directement dans la configuration `GetConfiguration` que la borne rapporte d'elle-même, environ une fois par heure — ce ne sont **pas** des mesures en direct, une valeur peut donc avoir jusqu'à une heure de retard sur la réalité (c'est aussi pourquoi ils restent lisibles hors ligne, contrairement aux capteurs de télémétrie ci-dessus). Ils sont créés **par borne**, pas par vendeur : uniquement pour la borne OCPP précise qui a effectivement rapporté cette clé avec une valeur plausible. La plupart des bornes de la flotte (EVduty/Elmec) ne rapportent que l'intervalle de battement et l'intervalle de mesure ; les bornes Wallbox Pulsar Plus qui parlent OCPP rapportent en plus le signal Wi-Fi, la charge min/max et la limite de courant. Seul **Signal Wi-Fi** est activé par défaut ; les cinq autres sont désactivés à l'installation — activez-les dans les paramètres de l'entité si vous le souhaitez. Une borne liée depuis moins d'une heure n'a pas encore eu sa configuration lue par le serveur : ces entités n'existent donc pas encore pour elle. Ils apparaissent d'eux-mêmes à la mise à jour suivant cette première lecture horaire (depuis la v0.11.1 ; les versions précédentes exigeaient un rechargement).
 
 **Capteurs binaires**
 - **En ligne** (connectivité) — tous les vendeurs
@@ -80,13 +84,13 @@ Les capteurs de télémétrie (puissance, énergie, courant, tension, températu
 - **Branché** — piloté par la plateforme (liste `capabilities`) plutôt que par une liste de vendeurs codée en dur ; couvre actuellement OCPP, Wallbox, IYILO, Tesla et Sigenergy AC/DC
 
 **Contrôles**
-- **Interrupteur de charge** (démarrer/arrêter) — OCPP, Wallbox, IYILO, Sigenergy AC et DC, et (v0.10.0+) les Tesla Wall Connector dont le compte permet le contrôle à distance — l'interrupteur est créé pour toute borne que la plateforme déclare contrôlable au chargement de l'intégration. Les commandes sont confirmées de bout en bout : les commandes OCPP sont interrogées jusqu'à ce que la borne les accepte/rejette ; les autres vendeurs répondent de façon synchrone (le résultat est déjà connu à la réponse) ; les échecs apparaissent en notification d'erreur HA et l'interrupteur revient en arrière (pas de faux état).
-- **Courant maximal** (curseur numérique, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, IYILO, Sigenergy AC. **Les bornes EVduty/Elmec ont un curseur distinct** (« Courant max (EVduty) ») : le serveur les pilote avec une seule commande de profil de charge, au format accepté par le fabricant. Appliquer une valeur **ne redémarre pas** la borne et **fonctionne pendant une recharge** (corrigé en v0.10.1 ; les versions précédentes étaient refusées pendant une recharge). Son plafond est la valeur d'installation relevée sur la borne, jamais au-dessus. Une borne affiche l'un OU l'autre curseur, jamais les deux. Les limites viennent du serveur (typiquement 6 A jusqu'au maximum de la borne). Depuis la v0.6.0, quand une borne OCPP rapporte elle-même sa limite de courant matérielle dans sa configuration, ce maximum est utilisé comme plafond — par exemple, les bornes Wallbox Pulsar Plus en OCPP qui rapportent 48 A obtiennent un plafond de 48 A au lieu du maximum générique de 32 A. Non disponible pour Sigenergy DC (aucune API de limite de courant côté DC).
+- **Interrupteur de charge** (démarrer/arrêter) — OCPP, Wallbox, IYILO, Sigenergy AC et DC, et (v0.10.0+) les Tesla Wall Connector dont le compte permet le contrôle à distance — l'interrupteur est créé dès que la plateforme déclare la borne contrôlable. Les commandes sont confirmées de bout en bout : les commandes OCPP sont interrogées jusqu'à ce que la borne les accepte/rejette ; les autres vendeurs répondent de façon synchrone (le résultat est déjà connu à la réponse) ; les échecs apparaissent en notification d'erreur HA et l'interrupteur revient en arrière (pas de faux état).
+- **Courant maximal** (curseur numérique, A) — OCPP (smart-charging `SetChargingProfile`), Wallbox, IYILO, Sigenergy AC. **Les bornes EVduty/Elmec ont un curseur distinct** (« Courant max (EVduty) ») : le serveur les pilote avec une seule commande de profil de charge, au format accepté par le fabricant. Appliquer une valeur **ne redémarre pas** la borne et **fonctionne pendant une recharge** (corrigé en v0.10.1 ; les versions précédentes étaient refusées pendant une recharge). Son plafond est la valeur d'installation relevée sur la borne, jamais au-dessus. Une borne affiche l'un OU l'autre curseur, jamais les deux. Si vous aviez installé la v0.11.0 et qu'une borne EVduty/Elmec affiche un second curseur « Courant max » en permanence indisponible, c'est un reste de cette version : vous pouvez le supprimer sans risque (paramètres de l'entité, puis Supprimer) ; le curseur « Courant max (EVduty) » est celui qui fonctionne. Les limites viennent du serveur (typiquement 6 A jusqu'au maximum de la borne). Depuis la v0.6.0, quand une borne OCPP rapporte elle-même sa limite de courant matérielle dans sa configuration, ce maximum est utilisé comme plafond — par exemple, les bornes Wallbox Pulsar Plus en OCPP qui rapportent 48 A obtiennent un plafond de 48 A au lieu du maximum générique de 32 A. Non disponible pour Sigenergy DC (aucune API de limite de courant côté DC).
 - **Interrupteur de verrou** — Wallbox seulement (activé = verrouillé).
 - **Interrupteur Plug & Charge** — **nouveau en v0.9.0, IYILO seulement.** Active/désactive le réglage Plug & Charge de la borne. Classé dans la section Configuration de l'appareil (un réglage, pas un contrôle de charge principal).
 - **Fuseau horaire** (liste déroulante) — **nouveau en v0.9.0, IYILO seulement.** Affiche et modifie le fuseau horaire configuré sur la borne. La liste des choix vient de la plateforme ; si la borne est actuellement réglée sur un fuseau horaire que la plateforme n'offre pas comme choix, cette valeur reste affichée quand même (jamais remplacée silencieusement par autre chose) — elle est simplement impossible à sélectionner à nouveau dans la liste tant que la plateforme ne l'offre pas. Classé dans Configuration.
 - **Redémarrer** (bouton) — **nouveau en v0.9.0, IYILO seulement.** Redémarre physiquement la borne et **interrompt toute session de charge en cours** — c'est une action réelle et perturbatrice, pas une simple actualisation. Home Assistant ne demande aucune confirmation avant d'exécuter l'appui sur un bouton, et un bouton peut aussi être déclenché par un script, une automatisation ou un assistant vocal. Il est donc **désactivé par défaut** : allez le chercher dans la section Configuration de l'appareil et activez-le une fois, délibérément, avant qu'il ne puisse être pressé. Il n'est **pas** bloqué pendant une session en cours : une borne coincée dans une session fantôme est justement le cas où il faut la redémarrer.
-- **Actualiser** (bouton) — **nouveau.** Toutes les bornes. Appuyez dessus pour forcer une vérification immédiate des données du serveur — la seule entité de cette intégration qui ne dépend jamais de `controllable`/du vendeur et qui est toujours disponible. Utile pour un changement fait en dehors de Home Assistant (ex. depuis l'application mobile Roulez Électrique), qui n'apparaît autrement dans HA qu'au prochain sondage prévu (voir **Intervalle de mise à jour** ci-dessous). L'action native de Home Assistant Core « Actualiser l'entité » (`homeassistant.update_entity`, accessible depuis la fenêtre de détail de l'entité ou dans les automatisations/scripts) fait exactement la même chose et fonctionne aussi — ce bouton est simplement un raccourci en un clic depuis l'application compagnon.
+- **Actualiser** (bouton) — **nouveau.** Toutes les bornes. Appuyez dessus pour forcer une vérification immédiate des données du serveur — la seule entité de cette intégration qui ne dépend jamais de `controllable`/du vendeur et qui est toujours disponible. Utile pour un changement fait en dehors de Home Assistant (ex. depuis l'application mobile Club Roulez Électrique), qui n'apparaît autrement dans HA qu'au prochain sondage prévu (voir **Intervalle de mise à jour** ci-dessous). L'action native de Home Assistant Core « Actualiser l'entité » (`homeassistant.update_entity`, accessible depuis la fenêtre de détail de l'entité ou dans les automatisations/scripts) fait exactement la même chose et fonctionne aussi — ce bouton est simplement un raccourci en un clic depuis l'application compagnon.
 
 Les trois réglages IYILO ci-dessus (Plug & Charge, fuseau horaire, redémarrage) deviennent tous *indisponibles ensemble* dès que les réglages de cette borne ne sont pas contrôlables en ce moment (compte IYILO inactif ou borne retirée) — une condition distincte de la disponibilité de l'interrupteur de charge lui-même, puisqu'une borne peut rester joignable pour le contrôle de charge alors que ses réglages ne le sont pas.
 
@@ -108,7 +112,7 @@ Utilisez le capteur **Énergie totale** de chaque borne comme source lorsque vou
 ## Prérequis
 
 - Home Assistant **2024.11.0** ou plus récent
-- Un compte Roulez Électrique sur [roulezelectrique.club](https://roulezelectrique.club)
+- Un compte Club Roulez Électrique sur [roulezelectrique.club](https://roulezelectrique.club)
 - Un jeton d'API depuis votre profil (voir Configuration)
 
 ---
@@ -121,7 +125,7 @@ Utilisez le capteur **Énergie totale** de chaque borne comme source lorsque vou
    - HACS → Intégrations → ⋮ → Dépôts personnalisés
    - URL : `https://github.com/joelvandal/ha-roulezelectrique`
    - Catégorie : Integration
-2. Cherchez « Roulez Électrique » et installez.
+2. Cherchez « Club Roulez Électrique » et installez.
 3. Redémarrez Home Assistant.
 
 ### Manuel
@@ -142,7 +146,7 @@ Utilisez le capteur **Énergie totale** de chaque borne comme source lorsque vou
 ### Étape 2 — Ajouter l'intégration dans HA
 
 1. Paramètres → Appareils et services → Ajouter une intégration.
-2. Cherchez « Roulez Électrique ».
+2. Cherchez « Club Roulez Électrique ».
 3. Collez votre jeton d'API et cliquez sur Soumettre — c'est tout (l'URL de la plateforme est intégrée).
 
 Vos bornes apparaissent comme appareils HA en quelques secondes. L'interface est disponible en **français et en anglais**.
@@ -153,7 +157,7 @@ Vos bornes apparaissent comme appareils HA en quelques secondes. L'interface est
 
 Après la configuration, ouvrez les paramètres de l'intégration pour ajuster :
 
-- **Intervalle de mise à jour** (30–900 secondes, défaut 30) : à quelle fréquence HA interroge pour de nouvelles données. L'intégration ralentit automatiquement si le serveur la limite en débit. C'est aussi la seule façon dont un changement fait en dehors de Home Assistant (ex. depuis l'application mobile Roulez Électrique) est détecté — voir le bouton **Actualiser** ci-dessous pour forcer une vérification immédiate plutôt que d'attendre.
+- **Intervalle de mise à jour** (30–900 secondes, défaut 30) : à quelle fréquence HA interroge pour de nouvelles données. L'intégration ralentit automatiquement si le serveur la limite en débit. C'est aussi la seule façon dont un changement fait en dehors de Home Assistant (ex. depuis l'application mobile Club Roulez Électrique) est détecté — voir le bouton **Actualiser** ci-dessous pour forcer une vérification immédiate plutôt que d'attendre.
 
 ---
 
@@ -165,11 +169,13 @@ Votre jeton d'API peut être renouvelé ou révoqué à tout moment depuis **Pro
 
 ## Diagnostics
 
-L'intégration prend en charge le téléchargement des diagnostics intégré à HA (Paramètres → Appareils et services → Roulez Électrique → Télécharger les diagnostics). Le fichier est **caviardé** : le jeton d'API, l'identifiant du compte, ainsi que le nom, le numéro de série et le NIV de chaque borne y sont masqués. Le reste (statut, puissance, fournisseur, modèle, capacités, totaux de récompenses) est conservé pour faciliter les rapports de bogue.
+L'intégration prend en charge le téléchargement des diagnostics intégré à HA (Paramètres → Appareils et services → Club Roulez Électrique → Télécharger les diagnostics). Le fichier est **caviardé** : le jeton d'API, l'identifiant du compte, ainsi que le nom, le numéro de série et le NIV de chaque borne y sont masqués. Le reste (statut, puissance, fournisseur, modèle, capacités, totaux de récompenses) est conservé pour faciliter les rapports de bogue.
 
 ---
 
 ## Mise à jour
+
+- **Depuis v0.10.x :** renommée **Club Roulez Électrique**, avec le logo officiel du Club et sa feuille comme icône. Rien à refaire : vos entités, leur historique, vos tableaux de bord et automatisations sont inchangés (les identifiants d'entités sont conservés). L'appareil Compte est renommé « Club Roulez Électrique » automatiquement au prochain rechargement ; un appareil que vous avez renommé vous-même garde votre nom. Les noms affichés des entités du compte suivent le nom de l'appareil, mais leurs identifiants ne changent pas. Le titre de l'intégration dans Paramètres → Appareils et services garde son ancien texte pour les installations existantes ; seules les nouvelles configurations reçoivent le nouveau titre.
 
 - **Depuis v0.2.4 ou antérieur :** les capteurs au niveau du compte (récompenses, invitations, énergie à vie, nombre de bornes) avaient un identifiant interne dupliqué qui est corrigé automatiquement au premier rechargement de l'intégration après la mise à jour — vos entités existantes, leur historique et tout tableau de bord/automatisation qui les référence sont préservés (aucun réajout, aucune nouvelle entité).
 - **Depuis v0.3.x :** les nouveaux capteurs par borne (Énergie totale, Sessions totales, Température, Niveau de batterie, Courant mesuré, Dernière connexion, Début de session, Vitesse de charge, Autonomie ajoutée, Type de connexion, NIV) apparaissent automatiquement au premier rechargement pour chaque borne dont le vendeur peut les rapporter — aucun réajout, aucun changement de configuration nécessaire. Les identifiants d'entités existants ne changent pas, mais la classe d'état du capteur **Énergie à vie** au niveau du compte passe de `total_increasing` à `total` (il peut maintenant être corrigé à la baisse, ex. après un nettoyage de données, sans que Home Assistant l'interprète à tort comme une remise à zéro du compteur). Home Assistant peut journaliser un avis ponctuel « les métadonnées statistiques ont changé » pour ce capteur : c'est normal et sans conséquence, ses statistiques à long terme et son historique continuent de fonctionner normalement.
